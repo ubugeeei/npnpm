@@ -95,6 +95,7 @@ mod tests {
             version: Version::parse("1.0.0").unwrap(),
             dist: PackageDistribution::default(),
             dependencies: Some(dependencies),
+            optional_dependencies: None,
             dev_dependencies: None,
             peer_dependencies: Some(peer_dependencies),
         };
@@ -114,6 +115,7 @@ mod tests {
             version: Version { major: 3, minor: 2, patch: 1, build: vec![], pre_release: vec![] },
             dist: PackageDistribution::default(),
             dependencies: None,
+            optional_dependencies: None,
             dev_dependencies: None,
             peer_dependencies: None,
         };

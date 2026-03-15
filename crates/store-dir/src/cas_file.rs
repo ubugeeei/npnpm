@@ -3,12 +3,20 @@ use derive_more::{Display, Error};
 use miette::Diagnostic;
 use pacquet_fs::{ensure_file, file_mode::EXEC_MODE, EnsureFileError};
 use sha2::{Digest, Sha512};
+use ssri::Integrity;
 use std::path::PathBuf;
 
 impl StoreDir {
     /// Path to a file in the store directory.
     pub fn cas_file_path(&self, hash: FileHash, executable: bool) -> PathBuf {
         let hex = format!("{hash:x}");
+        let suffix = if executable { "-exec" } else { "" };
+        self.file_path_by_hex_str(&hex, suffix)
+    }
+
+    /// Path to a file in the store directory addressed by integrity.
+    pub fn cas_file_path_by_integrity(&self, integrity: &Integrity, executable: bool) -> PathBuf {
+        let (_, hex) = integrity.to_hex();
         let suffix = if executable { "-exec" } else { "" };
         self.file_path_by_hex_str(&hex, suffix)
     }

@@ -3,6 +3,7 @@ use std::{fs, path::Path};
 use clap::Parser;
 use criterion::{Criterion, Throughput};
 use mockito::ServerGuard;
+use pacquet_lockfile::{Lockfile, PkgNameVerPeer};
 use pacquet_network::ThrottledClient;
 use pacquet_store_dir::StoreDir;
 use pacquet_tarball::DownloadTarballToStore;
@@ -53,6 +54,51 @@ fn bench_tarball(c: &mut Criterion, server: &mut ServerGuard, fixtures_folder: &
     group.finish();
 }
 
+fn legacy_virtual_store_name(package_specifier: &PkgNameVerPeer) -> String {
+    package_specifier
+        .to_string()
+        .replace('/', "+")
+        .replace(")(", "_")
+        .replace('(', "_")
+        .replace(')', "")
+}
+
+fn bench_virtual_store_name(c: &mut Criterion, root: &Path) {
+    let lockfile = Lockfile::load_from_dir(root.join("crates/testing-utils/src/fixtures/big"))
+        .expect("load lockfile fixture")
+        .expect("fixture lockfile should exist");
+    let package_specifiers = lockfile
+        .packages
+        .expect("fixture lockfile should contain packages")
+        .into_keys()
+        .map(|dependency_path| dependency_path.package_specifier)
+        .collect::<Vec<_>>();
+
+    let mut group = c.benchmark_group("virtual_store_name");
+    group.throughput(Throughput::Elements(package_specifiers.len() as u64));
+    group.bench_function("legacy_big_lockfile", |b| {
+        b.iter(|| {
+            package_specifiers
+                .iter()
+                .map(|package_specifier| {
+                    std::hint::black_box(legacy_virtual_store_name(package_specifier)).len()
+                })
+                .sum::<usize>()
+        });
+    });
+    group.bench_function("optimized_big_lockfile", |b| {
+        b.iter(|| {
+            package_specifiers
+                .iter()
+                .map(|package_specifier| {
+                    std::hint::black_box(package_specifier.to_virtual_store_name()).len()
+                })
+                .sum::<usize>()
+        });
+    });
+    group.finish();
+}
+
 pub fn main() -> Result<(), String> {
     let mut server = mockito::Server::new();
     let CliArgs { save_baseline } = CliArgs::parse();
@@ -64,7 +110,9 @@ pub fn main() -> Result<(), String> {
         criterion = criterion.save_baseline(baseline);
     }
 
+    bench_virtual_store_name(&mut criterion, &root);
     bench_tarball(&mut criterion, &mut server, &fixtures_folder);
+    criterion.final_summary();
 
     Ok(())
 }

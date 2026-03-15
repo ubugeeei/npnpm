@@ -39,13 +39,18 @@ pub enum InitStateError {
 impl State {
     /// Initialize the application state.
     pub fn init(manifest_path: PathBuf, config: &'static Npmrc) -> Result<Self, InitStateError> {
+        let lockfile_dir =
+            manifest_path.parent().map(ToOwned::to_owned).unwrap_or_else(|| PathBuf::from("."));
+
         Ok(State {
             config,
             manifest: manifest_path
                 .pipe(PackageManifest::create_if_needed)
                 .map_err(InitStateError::LoadManifest)?,
-            lockfile: call_load_lockfile(config.lockfile, Lockfile::load_from_current_dir)
-                .map_err(InitStateError::LoadLockfile)?,
+            lockfile: call_load_lockfile(config.lockfile, || {
+                Lockfile::load_from_dir(&lockfile_dir)
+            })
+            .map_err(InitStateError::LoadLockfile)?,
             http_client: ThrottledClient::new_from_cpu_count(),
             tarball_mem_cache: MemCache::new(),
             resolved_packages: ResolvedPackages::new(),

@@ -1,5 +1,6 @@
 use derive_more::{Display, Error};
 use miette::Diagnostic;
+use pacquet_npmrc::PackageImportMethod;
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -8,46 +9,47 @@ use std::{
 /// Error type for [`link_file`].
 #[derive(Debug, Display, Error, Diagnostic)]
 pub enum LinkFileError {
-    #[display("cannot create directory at {dirname:?}: {error}")]
-    CreateDir {
-        dirname: PathBuf,
-        #[error(source)]
-        error: io::Error,
-    },
-    #[display("fail to create a link from {from:?} to {to:?}: {error}")]
+    #[display("fail to import file from {from:?} to {to:?} with {method:?}: {error}")]
     CreateLink {
         from: PathBuf,
         to: PathBuf,
+        method: PackageImportMethod,
         #[error(source)]
         error: io::Error,
     },
 }
 
-/// Reflink or copy a single file.
+/// Import a single file from the store into the virtual store.
 ///
 /// * If `target_link` already exists, do nothing.
-/// * If parent dir of `target_link` doesn't exist, it will be created.
-pub fn link_file(source_file: &Path, target_link: &Path) -> Result<(), LinkFileError> {
+/// * The parent directory of `target_link` is assumed to already exist.
+pub fn link_file(
+    import_method: PackageImportMethod,
+    source_file: &Path,
+    target_link: &Path,
+) -> Result<(), LinkFileError> {
     if target_link.exists() {
         return Ok(());
     }
 
-    if let Some(parent_dir) = target_link.parent() {
-        fs::create_dir_all(parent_dir).map_err(|error| LinkFileError::CreateDir {
-            dirname: parent_dir.to_path_buf(),
-            error,
-        })?;
-    }
-
-    // TODO: add hardlink (https://github.com/pnpm/pacquet/issues/174)
-    // NOTE: do not hardlink packages with postinstall
-
-    reflink_copy::reflink_or_copy(source_file, target_link).map_err(|error| {
-        LinkFileError::CreateLink {
-            from: source_file.to_path_buf(),
-            to: target_link.to_path_buf(),
-            error,
+    // NOTE: once lifecycle scripts start mutating installed files, hardlinking should be
+    // selectively disabled for packages with side effects just like pnpm does.
+    let import_result = match import_method {
+        PackageImportMethod::Auto => reflink_copy::reflink(source_file, target_link)
+            .or_else(|_| fs::hard_link(source_file, target_link))
+            .or_else(|_| fs::copy(source_file, target_link).map(|_| ())),
+        PackageImportMethod::Hardlink => fs::hard_link(source_file, target_link),
+        PackageImportMethod::Copy => fs::copy(source_file, target_link).map(|_| ()),
+        PackageImportMethod::Clone => reflink_copy::reflink(source_file, target_link),
+        PackageImportMethod::CloneOrCopy => {
+            reflink_copy::reflink_or_copy(source_file, target_link).map(|_| ())
         }
+    };
+    import_result.map_err(|error| LinkFileError::CreateLink {
+        from: source_file.to_path_buf(),
+        to: target_link.to_path_buf(),
+        method: import_method,
+        error,
     })?;
 
     Ok(())

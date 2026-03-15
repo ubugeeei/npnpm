@@ -14,6 +14,7 @@ mod project_snapshot;
 mod resolution;
 mod resolved_dependency;
 mod root_project_snapshot;
+mod save_lockfile;
 
 pub use comver::*;
 pub use dependency_path::*;
@@ -31,6 +32,7 @@ pub use project_snapshot::*;
 pub use resolution::*;
 pub use resolved_dependency::*;
 pub use root_project_snapshot::*;
+pub use save_lockfile::*;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -40,6 +42,12 @@ use std::collections::HashMap;
 pub struct LockfileSettings {
     auto_install_peers: bool,
     exclude_links_from_lockfile: bool,
+}
+
+impl LockfileSettings {
+    pub fn new(auto_install_peers: bool, exclude_links_from_lockfile: bool) -> Self {
+        Self { auto_install_peers, exclude_links_from_lockfile }
+    }
 }
 
 /// * Specification: <https://github.com/pnpm/spec/blob/master/lockfile/6.0.md>

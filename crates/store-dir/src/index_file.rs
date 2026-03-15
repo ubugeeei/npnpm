@@ -4,7 +4,12 @@ use miette::Diagnostic;
 use pacquet_fs::{ensure_file, EnsureFileError};
 use serde::{Deserialize, Serialize};
 use ssri::{Algorithm, Integrity};
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::HashMap,
+    fs,
+    io::{self, ErrorKind},
+    path::PathBuf,
+};
 
 impl StoreDir {
     /// Path to an index file of a tarball.
@@ -43,6 +48,13 @@ pub enum WriteIndexFileError {
     WriteFile(EnsureFileError),
 }
 
+/// Error type of [`StoreDir::read_index_file`].
+#[derive(Debug, Display, Error, Diagnostic)]
+pub enum ReadIndexFileError {
+    ReadFile(io::Error),
+    ParseFile(serde_json::Error),
+}
+
 impl StoreDir {
     /// Write a JSON file that indexes files in a tarball to the store directory.
     pub fn write_index_file(
@@ -55,6 +67,21 @@ impl StoreDir {
             serde_json::to_string(&index_content).expect("convert a TarballIndex to JSON");
         ensure_file(&file_path, index_content.as_bytes(), Some(0o666))
             .map_err(WriteIndexFileError::WriteFile)
+    }
+
+    /// Read a tarball index file from the store directory.
+    pub fn read_index_file(
+        &self,
+        integrity: &Integrity,
+    ) -> Result<Option<PackageFilesIndex>, ReadIndexFileError> {
+        let file_path = self.index_file_path(integrity);
+        let contents = match fs::read_to_string(file_path) {
+            Ok(contents) => contents,
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(ReadIndexFileError::ReadFile(error)),
+        };
+
+        serde_json::from_str(&contents).map(Some).map_err(ReadIndexFileError::ParseFile)
     }
 }
 

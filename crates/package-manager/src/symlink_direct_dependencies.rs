@@ -1,5 +1,5 @@
 use crate::symlink_package;
-use pacquet_lockfile::{PkgName, PkgNameVerPeer, RootProjectSnapshot};
+use pacquet_lockfile::{PkgNameVerPeer, RootProjectSnapshot};
 use pacquet_npmrc::Npmrc;
 use pacquet_package_manifest::DependencyGroup;
 use rayon::prelude::*;
@@ -37,10 +37,8 @@ where
             .collect::<Vec<_>>()
             .par_iter()
             .for_each(|(name, spec)| {
-                // TODO: the code below is not optimal
                 let virtual_store_name =
-                    PkgNameVerPeer::new(PkgName::clone(name), spec.version.clone())
-                        .to_virtual_store_name();
+                    PkgNameVerPeer::to_virtual_store_name_from_parts(name, &spec.version);
 
                 let name_str = name.to_string();
                 symlink_package(

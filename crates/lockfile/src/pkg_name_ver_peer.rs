@@ -1,4 +1,5 @@
-use crate::{ParsePkgNameSuffixError, ParsePkgVerPeerError, PkgNameSuffix, PkgVerPeer};
+use crate::{ParsePkgNameSuffixError, ParsePkgVerPeerError, PkgName, PkgNameSuffix, PkgVerPeer};
+use std::fmt::Write;
 
 /// Syntax: `{name}@{version}({peers})`
 ///
@@ -13,9 +14,48 @@ pub type ParsePkgNameVerPeerError = ParsePkgNameSuffixError<ParsePkgVerPeerError
 impl PkgNameVerPeer {
     /// Construct the name of the corresponding subdirectory in the virtual store directory.
     pub fn to_virtual_store_name(&self) -> String {
-        // the code below is far from optimal,
-        // optimization requires parser combinator
-        self.to_string().replace('/', "+").replace(")(", "_").replace('(', "_").replace(')', "")
+        Self::to_virtual_store_name_from_parts(&self.name, &self.suffix)
+    }
+
+    /// Construct the virtual store name from borrowed package parts.
+    pub fn to_virtual_store_name_from_parts(name: &PkgName, ver_peer: &PkgVerPeer) -> String {
+        let mut result =
+            String::with_capacity(estimated_virtual_store_name_capacity(name, ver_peer));
+
+        push_virtual_store_name(&mut result, name);
+        result.push('@');
+        write!(&mut result, "{}", ver_peer.version()).expect("write version to string");
+        push_virtual_store_peer_suffix(&mut result, ver_peer.peer());
+
+        result
+    }
+}
+
+fn estimated_virtual_store_name_capacity(name: &PkgName, ver_peer: &PkgVerPeer) -> usize {
+    name.scope.as_deref().map_or(0, |scope| scope.len() + 2)
+        + name.bare.len()
+        + ver_peer.peer().len()
+        + 17
+}
+
+fn push_virtual_store_name(buf: &mut String, name: &PkgName) {
+    if let Some(scope) = name.scope.as_deref() {
+        buf.push('@');
+        buf.push_str(scope);
+        buf.push('+');
+    }
+
+    buf.push_str(&name.bare);
+}
+
+fn push_virtual_store_peer_suffix(buf: &mut String, peer: &str) {
+    for ch in peer.chars() {
+        match ch {
+            '/' => buf.push('+'),
+            '(' => buf.push('_'),
+            ')' => {}
+            _ => buf.push(ch),
+        }
     }
 }
 

@@ -13,10 +13,12 @@ use miette::Diagnostic;
 use pacquet_fs::file_mode;
 use pacquet_network::ThrottledClient;
 use pacquet_store_dir::{
-    PackageFileInfo, PackageFilesIndex, StoreDir, WriteCasFileError, WriteIndexFileError,
+    PackageFileInfo, PackageFilesIndex, ReadIndexFileError, StoreDir, WriteCasFileError,
+    WriteIndexFileError,
 };
 use pipe_trait::Pipe;
 use ssri::Integrity;
+use std::str::FromStr;
 use tar::Archive;
 use tokio::sync::{Notify, RwLock};
 use tracing::instrument;
@@ -66,6 +68,16 @@ pub enum TarballError {
     WriteTarballIndexFile(WriteIndexFileError),
 
     #[from(ignore)]
+    #[display("Failed to read tarball index: {_0}")]
+    #[diagnostic(transparent)]
+    ReadTarballIndexFile(ReadIndexFileError),
+
+    #[from(ignore)]
+    #[display("Failed to parse file integrity from tarball index: {_0}")]
+    #[diagnostic(code(pacquet_tarball::parse_file_integrity))]
+    ParseFileIntegrity(ssri::Error),
+
+    #[from(ignore)]
     #[diagnostic(code(pacquet_tarball::task_join_error))]
     TaskJoin(tokio::task::JoinError),
 }
@@ -110,15 +122,36 @@ pub struct DownloadTarballToStore<'a> {
 }
 
 impl<'a> DownloadTarballToStore<'a> {
+    fn load_from_store(&self) -> Result<Option<HashMap<String, PathBuf>>, TarballError> {
+        let &DownloadTarballToStore { store_dir, package_integrity, .. } = self;
+        let Some(index) = store_dir
+            .read_index_file(package_integrity)
+            .map_err(TarballError::ReadTarballIndexFile)?
+        else {
+            return Ok(None);
+        };
+
+        let cas_paths = index
+            .files
+            .into_iter()
+            .map(|(path, info)| {
+                let integrity = Integrity::from_str(&info.integrity)
+                    .map_err(TarballError::ParseFileIntegrity)?;
+                let executable = file_mode::is_all_exec(info.mode);
+                let store_path = store_dir.cas_file_path_by_integrity(&integrity, executable);
+                Ok((path, store_path))
+            })
+            .collect::<Result<HashMap<_, _>, TarballError>>()?;
+
+        Ok(Some(cas_paths))
+    }
+
     /// Execute the subroutine with an in-memory cache.
     pub async fn run_with_mem_cache(
         self,
         mem_cache: &'a MemCache,
     ) -> Result<Arc<HashMap<String, PathBuf>>, TarballError> {
         let &DownloadTarballToStore { package_url, .. } = &self;
-
-        // QUESTION: I see no copying from existing store_dir, is there such mechanism?
-        // TODO: If it's not implemented yet, implement it
 
         if let Some(cache_lock) = mem_cache.get(package_url) {
             let notify = match &*cache_lock.write().await {
@@ -144,7 +177,14 @@ impl<'a> DownloadTarballToStore<'a> {
             if mem_cache.insert(package_url.to_string(), Arc::clone(&cache_lock)).is_some() {
                 tracing::warn!(target: "pacquet::download", ?package_url, "Race condition detected when writing to cache");
             }
-            let cas_paths = self.run_without_mem_cache().await?.pipe(Arc::new);
+            let cas_paths = if let Some(cas_paths) = self.load_from_store()? {
+                tracing::info!(target: "pacquet::download", ?package_url, "Reuse store index");
+                cas_paths
+            } else {
+                tracing::info!(target: "pacquet::download", ?package_url, "Use network cache miss");
+                self.run_without_mem_cache().await?
+            }
+            .pipe(Arc::new);
             let mut cache_write = cache_lock.write().await;
             *cache_write = CacheValue::Available(Arc::clone(&cas_paths));
             notify.notify_waiters();
@@ -354,6 +394,41 @@ mod tests {
         .run_without_mem_cache()
         .await
         .expect_err("checksum mismatch");
+
+        drop(store_dir);
+    }
+
+    #[tokio::test]
+    #[cfg(not(target_os = "windows"))]
+    async fn reuses_store_index_without_network_roundtrip() {
+        let (store_dir, store_path) = tempdir_with_leaked_path();
+        let package_integrity =
+            integrity("sha512-dj7vjIn1Ar8sVXj2yAXiMNCJDmS9MQ9XMlIecX2dIzzhjSHCyKo4DdXjXMs7wKW2kj6yvVRSpuQjOZ3YLrh56w==");
+
+        DownloadTarballToStore {
+            http_client: &Default::default(),
+            store_dir: store_path,
+            package_integrity: &package_integrity,
+            package_unpacked_size: Some(16697),
+            package_url: "https://registry.npmjs.org/@fastify/error/-/error-3.3.0.tgz",
+        }
+        .run_without_mem_cache()
+        .await
+        .unwrap();
+
+        let mem_cache = MemCache::new();
+        let cas_files = DownloadTarballToStore {
+            http_client: &Default::default(),
+            store_dir: store_path,
+            package_integrity: &package_integrity,
+            package_unpacked_size: Some(16697),
+            package_url: "https://127.0.0.1:9/should-not-be-fetched.tgz",
+        }
+        .run_with_mem_cache(&mem_cache)
+        .await
+        .unwrap();
+
+        assert!(cas_files.contains_key("package.json"));
 
         drop(store_dir);
     }

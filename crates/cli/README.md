@@ -1,3 +1,7 @@
+# CLI Compatibility
+
+This file tracks the path toward full pnpm CLI compatibility.
+
 # Options
 
 [pnpm documentation](https://pnpm.io/pnpm-cli#options)

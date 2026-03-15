@@ -41,3 +41,5 @@ pretty_assertions = { workspace = true }
 tempfile          = { workspace = true }
 tokio             = { workspace = true }
 walkdir           = { workspace = true }
+mockito           = { workspace = true }
+ssri              = { workspace = true }

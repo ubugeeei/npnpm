@@ -14,8 +14,7 @@ pub fn create_symlink_layout(
     dependencies.par_iter().for_each(|(name, spec)| {
         let virtual_store_name = match spec {
             PackageSnapshotDependency::PkgVerPeer(ver_peer) => {
-                let package_specifier = PkgNameVerPeer::new(name.clone(), ver_peer.clone()); // TODO: remove copying here
-                package_specifier.to_virtual_store_name()
+                PkgNameVerPeer::to_virtual_store_name_from_parts(name, ver_peer)
             }
             PackageSnapshotDependency::DependencyPath(dependency_path) => {
                 dependency_path.package_specifier.to_virtual_store_name()

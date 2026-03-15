@@ -3,6 +3,7 @@ use pacquet_lockfile::{DependencyPath, PackageSnapshot, RootProjectSnapshot};
 use pacquet_network::ThrottledClient;
 use pacquet_npmrc::Npmrc;
 use pacquet_package_manifest::DependencyGroup;
+use pacquet_tarball::MemCache;
 use std::collections::HashMap;
 
 /// This subroutine installs dependencies from a frozen lockfile.
@@ -19,6 +20,7 @@ pub struct InstallFrozenLockfile<'a, DependencyGroupList>
 where
     DependencyGroupList: IntoIterator<Item = DependencyGroup>,
 {
+    pub tarball_mem_cache: &'a MemCache,
     pub http_client: &'a ThrottledClient,
     pub config: &'static Npmrc,
     pub project_snapshot: &'a RootProjectSnapshot,
@@ -33,6 +35,7 @@ where
     /// Execute the subroutine.
     pub async fn run(self) {
         let InstallFrozenLockfile {
+            tarball_mem_cache,
             http_client,
             config,
             project_snapshot,
@@ -40,11 +43,9 @@ where
             dependency_groups,
         } = self;
 
-        // TODO: check if the lockfile is out-of-date
-
-        assert!(config.prefer_frozen_lockfile, "Non frozen lockfile is not yet supported");
-
-        CreateVirtualStore { http_client, config, packages, project_snapshot }.run().await;
+        CreateVirtualStore { tarball_mem_cache, http_client, config, packages, project_snapshot }
+            .run()
+            .await;
 
         SymlinkDirectDependencies { config, project_snapshot, dependency_groups }.run();
     }
