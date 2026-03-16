@@ -1363,6 +1363,7 @@ version = "0.0.1"
 dependencies = [
  "derive_more",
  "miette",
+ "tempfile",
 ]
 
 [[package]]
@@ -1475,6 +1476,7 @@ dependencies = [
  "pretty_assertions",
  "rayon",
  "reflink-copy",
+ "serde_json",
  "ssri",
  "tempfile",
  "tokio",

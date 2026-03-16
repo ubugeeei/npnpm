@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -59,6 +60,13 @@ pub enum DependencyGroup {
 pub enum BundleDependencies {
     Boolean(bool),
     List(Vec<String>),
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum PackageBin {
+    String(String),
+    Map(HashMap<String, String>),
 }
 
 /// Content of the `package.json` files and its path.
@@ -136,6 +144,10 @@ impl PackageManifest {
         &self.value
     }
 
+    pub fn name(&self) -> Option<&str> {
+        self.value.get("name").and_then(Value::as_str)
+    }
+
     pub fn save(&self) -> Result<(), PackageManifestError> {
         let mut file = fs::File::create(&self.path)?;
         let contents = serde_json::to_string_pretty(&self.value)?;
@@ -166,6 +178,22 @@ impl PackageManifest {
             .transpose()
     }
 
+    pub fn bin_entries(&self) -> Result<Vec<(String, String)>, PackageManifestError> {
+        let Some(bin) = self.value.get("bin") else {
+            return Ok(vec![]);
+        };
+
+        let bin = serde_json::from_value::<PackageBin>(bin.clone())?;
+        Ok(match bin {
+            PackageBin::String(path) => self
+                .name()
+                .and_then(Self::default_bin_name)
+                .map(|name| vec![(name.to_string(), path)])
+                .unwrap_or_default(),
+            PackageBin::Map(entries) => entries.into_iter().collect(),
+        })
+    }
+
     pub fn add_dependency(
         &mut self,
         name: &str,
@@ -187,6 +215,10 @@ impl PackageManifest {
             self.value[dependency_type] = Value::Object(dependencies);
         }
         Ok(())
+    }
+
+    fn default_bin_name(package_name: &str) -> Option<&str> {
+        package_name.rsplit('/').next()
     }
 
     pub fn script(
@@ -334,5 +366,55 @@ mod tests {
         case!(r#"{ "bundleDependencies": true }"# => true.pipe(BundleDependencies::Boolean).pipe(Some));
         case!(r#"{ "bundledDependencies": true }"# => true.pipe(BundleDependencies::Boolean).pipe(Some));
         case!(r#"{}"# => None);
+    }
+
+    #[test]
+    fn should_read_string_bin_entry() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("package.json");
+        fs::write(
+            &path,
+            serde_json::json!({
+                "name": "@scope/example",
+                "bin": "bin/example.js",
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let manifest = PackageManifest::from_path(path).unwrap();
+        assert_eq!(
+            manifest.bin_entries().unwrap(),
+            vec![("example".to_string(), "bin/example.js".to_string())]
+        );
+    }
+
+    #[test]
+    fn should_read_map_bin_entries() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("package.json");
+        fs::write(
+            &path,
+            serde_json::json!({
+                "name": "example",
+                "bin": {
+                    "foo": "bin/foo.js",
+                    "bar": "bin/bar.js",
+                },
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let manifest = PackageManifest::from_path(path).unwrap();
+        let mut entries = manifest.bin_entries().unwrap();
+        entries.sort();
+        assert_eq!(
+            entries,
+            vec![
+                ("bar".to_string(), "bin/bar.js".to_string()),
+                ("foo".to_string(), "bin/foo.js".to_string()),
+            ]
+        );
     }
 }

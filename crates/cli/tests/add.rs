@@ -6,7 +6,7 @@ use pacquet_testing_utils::{
     fs::{get_all_folders, get_filenames_in_folder},
 };
 use pretty_assertions::assert_eq;
-use std::{env, ffi::OsStr, fs, path::PathBuf};
+use std::{collections::HashMap, env, ffi::OsStr, fs, path::PathBuf};
 use tempfile::TempDir;
 
 fn exec_pacquet_in_temp_cwd<Args>(args: Args) -> (TempDir, PathBuf, AddMockedRegistry)
@@ -132,5 +132,30 @@ fn should_add_peer_dependency() {
     assert!(file
         .dependencies([DependencyGroup::Peer])
         .any(|(k, _)| k == "@pnpm.e2e/hello-world-js-bin"));
+    drop((root, anchor)); // cleanup
+}
+
+#[test]
+fn should_add_multiple_dependencies() {
+    let (root, dir, anchor) =
+        exec_pacquet_in_temp_cwd(["add", "@pnpm.e2e/hello-world-js-bin", "@pnpm/xyz"]);
+    let file = PackageManifest::from_path(dir.join("package.json")).unwrap();
+    let dependencies = file.dependencies([DependencyGroup::Prod]).collect::<HashMap<_, _>>();
+
+    assert_eq!(dependencies.get("@pnpm.e2e/hello-world-js-bin"), Some(&"^1.0.0"));
+    assert_eq!(dependencies.get("@pnpm/xyz"), Some(&"^1.0.0"));
+
+    drop((root, anchor)); // cleanup
+}
+
+#[test]
+fn should_preserve_explicit_version_specifier() {
+    let (root, dir, anchor) =
+        exec_pacquet_in_temp_cwd(["add", "@pnpm.e2e/hello-world-js-bin@1.0.0"]);
+    let file = PackageManifest::from_path(dir.join("package.json")).unwrap();
+    let dependencies = file.dependencies([DependencyGroup::Prod]).collect::<HashMap<_, _>>();
+
+    assert_eq!(dependencies.get("@pnpm.e2e/hello-world-js-bin"), Some(&"1.0.0"));
+
     drop((root, anchor)); // cleanup
 }

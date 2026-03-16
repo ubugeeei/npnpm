@@ -1,4 +1,7 @@
-use crate::{GenerateLockfile, InstallFrozenLockfile, InstallWithoutLockfile, ResolvedPackages};
+use crate::{
+    CreateBins, GenerateLockfile, InstallFrozenLockfile, InstallWithoutLockfile,
+    RegistryMetadataCache, ResolvedPackages,
+};
 use pacquet_lockfile::{Lockfile, RootProjectSnapshot};
 use pacquet_network::ThrottledClient;
 use pacquet_npmrc::Npmrc;
@@ -20,6 +23,7 @@ where
     pub lockfile: Option<&'a Lockfile>,
     pub dependency_groups: DependencyGroupList,
     pub frozen_lockfile: bool,
+    pub registry_metadata_cache: &'a RegistryMetadataCache,
 }
 
 impl<'a, DependencyGroupList> Install<'a, DependencyGroupList>
@@ -87,6 +91,7 @@ where
             lockfile,
             dependency_groups,
             frozen_lockfile,
+            registry_metadata_cache,
         } = self;
         let dependency_groups = dependency_groups.into_iter().collect::<Vec<_>>();
 
@@ -101,6 +106,7 @@ where
                     config,
                     manifest,
                     dependency_groups,
+                    registry_metadata_cache,
                 }
                 .run()
                 .await;
@@ -137,6 +143,7 @@ where
                     config,
                     manifest,
                     dependency_groups: &dependency_groups,
+                    registry_metadata_cache,
                 }
                 .run()
                 .await
@@ -157,6 +164,13 @@ where
                 .await;
             }
         }
+
+        CreateBins {
+            modules_dir: &config.modules_dir,
+            virtual_store_dir: &config.virtual_store_dir,
+        }
+        .run()
+        .expect("create node_modules/.bin layout");
 
         tracing::info!(target: "pacquet::install", "Complete all");
     }
@@ -201,6 +215,7 @@ mod tests {
         config.virtual_store_dir = virtual_store_dir.to_path_buf();
         config.registry = mock_instance.url();
         let config = config.leak();
+        let registry_metadata_cache = RegistryMetadataCache::new();
 
         Install {
             tarball_mem_cache: &Default::default(),
@@ -215,6 +230,7 @@ mod tests {
             ],
             frozen_lockfile: false,
             resolved_packages: &Default::default(),
+            registry_metadata_cache: &registry_metadata_cache,
         }
         .run()
         .await;
@@ -260,6 +276,7 @@ mod tests {
 
         let tarball_mem_cache = MemCache::new();
         let resolved_packages = ResolvedPackages::new();
+        let registry_metadata_cache = RegistryMetadataCache::new();
         let http_client = ThrottledClient::new_from_cpu_count();
 
         Install {
@@ -271,6 +288,7 @@ mod tests {
             dependency_groups: [DependencyGroup::Prod],
             frozen_lockfile: false,
             resolved_packages: &resolved_packages,
+            registry_metadata_cache: &registry_metadata_cache,
         }
         .run()
         .await;
@@ -292,6 +310,7 @@ mod tests {
             dependency_groups: [DependencyGroup::Prod],
             frozen_lockfile: true,
             resolved_packages: &resolved_packages,
+            registry_metadata_cache: &registry_metadata_cache,
         }
         .run()
         .await;

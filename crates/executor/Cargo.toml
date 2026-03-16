@@ -13,3 +13,6 @@ repository.workspace  = true
 [dependencies]
 derive_more = { workspace = true }
 miette      = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

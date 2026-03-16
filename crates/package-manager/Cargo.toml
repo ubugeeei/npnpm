@@ -29,6 +29,7 @@ rayon           = { workspace = true }
 reflink-copy    = { workspace = true }
 tracing         = { workspace = true }
 miette          = { workspace = true }
+tokio           = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 pacquet-store-dir     = { workspace = true }
@@ -38,6 +39,7 @@ pacquet-testing-utils = { workspace = true }
 node-semver       = { workspace = true }
 insta             = { workspace = true }
 pretty_assertions = { workspace = true }
+serde_json       = { workspace = true }
 tempfile          = { workspace = true }
 tokio             = { workspace = true }
 walkdir           = { workspace = true }

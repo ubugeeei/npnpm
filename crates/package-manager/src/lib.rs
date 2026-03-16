@@ -1,4 +1,5 @@
 mod add;
+mod create_bins;
 mod create_cas_files;
 mod create_symlink_layout;
 mod create_virtual_dir_by_snapshot;
@@ -10,10 +11,12 @@ mod install_package_by_snapshot;
 mod install_package_from_registry;
 mod install_without_lockfile;
 mod link_file;
+mod registry_metadata_cache;
 mod symlink_direct_dependencies;
 mod symlink_package;
 
 pub use add::*;
+pub use create_bins::*;
 pub use create_cas_files::*;
 pub use create_symlink_layout::*;
 pub use create_virtual_dir_by_snapshot::*;
@@ -25,5 +28,6 @@ pub use install_package_by_snapshot::*;
 pub use install_package_from_registry::*;
 pub use install_without_lockfile::*;
 pub use link_file::*;
+pub use registry_metadata_cache::*;
 pub use symlink_direct_dependencies::*;
 pub use symlink_package::*;

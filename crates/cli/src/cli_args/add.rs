@@ -65,8 +65,9 @@ impl AddDependencyOptions {
 
 #[derive(Debug, Args)]
 pub struct AddArgs {
-    /// Name of the package
-    pub package_name: String, // TODO: 1. support version range, 2. multiple arguments, 3. name this `packages`
+    /// One or more package specifiers
+    #[clap(required = true)]
+    pub packages: Vec<String>,
     /// --save-prod, --save-dev, --save-optional, --save-peer
     #[clap(flatten)]
     pub dependency_options: AddDependencyOptions,
@@ -85,8 +86,15 @@ impl AddArgs {
     pub async fn run(self, mut state: State) -> miette::Result<()> {
         // TODO: if a package already exists in another dependency group, don't remove the existing entry.
 
-        let State { tarball_mem_cache, http_client, config, manifest, lockfile, resolved_packages } =
-            &mut state;
+        let State {
+            tarball_mem_cache,
+            http_client,
+            config,
+            manifest,
+            lockfile,
+            resolved_packages,
+            registry_metadata_cache,
+        } = &mut state;
 
         Add {
             tarball_mem_cache,
@@ -95,9 +103,10 @@ impl AddArgs {
             manifest,
             lockfile: lockfile.as_ref(),
             list_dependency_groups: || self.dependency_options.dependency_groups(),
-            package_name: &self.package_name,
+            packages: &self.packages,
             save_exact: self.save_exact,
             resolved_packages,
+            registry_metadata_cache,
         }
         .run()
         .await

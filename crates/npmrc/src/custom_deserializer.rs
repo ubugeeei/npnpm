@@ -152,7 +152,15 @@ where
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
-    use std::env;
+    use std::{
+        env,
+        sync::{Mutex, OnceLock},
+    };
+
+    fn env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     fn display_store_dir(store_dir: &StoreDir) -> String {
         store_dir.display().to_string().replace('\\', "/")
@@ -160,6 +168,8 @@ mod tests {
 
     #[test]
     fn test_default_store_dir_with_pnpm_home_env() {
+        let _guard = env_lock().lock().unwrap();
+        env::remove_var("XDG_DATA_HOME");
         env::set_var("PNPM_HOME", "/tmp/pnpm-home"); // TODO: change this to dependency injection
         let store_dir = default_store_dir();
         assert_eq!(display_store_dir(&store_dir), "/tmp/pnpm-home/store");
@@ -168,6 +178,8 @@ mod tests {
 
     #[test]
     fn test_default_store_dir_with_xdg_env() {
+        let _guard = env_lock().lock().unwrap();
+        env::remove_var("PNPM_HOME");
         env::set_var("XDG_DATA_HOME", "/tmp/xdg_data_home"); // TODO: change this to dependency injection
         let store_dir = default_store_dir();
         assert_eq!(display_store_dir(&store_dir), "/tmp/xdg_data_home/pnpm/store");

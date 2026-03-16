@@ -1,3 +1,4 @@
+use crate::{fetch_package_metadata, RegistryMetadataCache};
 use async_recursion::async_recursion;
 use pacquet_lockfile::{
     ComVer, DependencyPath, Lockfile, LockfileResolution, LockfileSettings, PackageSnapshot,
@@ -8,7 +9,7 @@ use pacquet_lockfile::{
 use pacquet_network::ThrottledClient;
 use pacquet_npmrc::Npmrc;
 use pacquet_package_manifest::{DependencyGroup, PackageManifest};
-use pacquet_registry::{Package, PackageTag, PackageVersion, RegistryError};
+use pacquet_registry::{PackageVersion, RegistryError};
 use std::{collections::HashMap, str::FromStr};
 
 /// Resolve a [`PackageManifest`] into a pnpm-compatible lockfile.
@@ -18,16 +19,23 @@ pub struct GenerateLockfile<'a> {
     pub config: &'static Npmrc,
     pub manifest: &'a PackageManifest,
     pub dependency_groups: &'a [DependencyGroup],
+    pub registry_metadata_cache: &'a RegistryMetadataCache,
 }
 
 impl<'a> GenerateLockfile<'a> {
     pub async fn run(self) -> Result<Lockfile, RegistryError> {
-        let GenerateLockfile { http_client, config, manifest, dependency_groups } = self;
+        let GenerateLockfile {
+            http_client,
+            config,
+            manifest,
+            dependency_groups,
+            registry_metadata_cache,
+        } = self;
 
         let mut builder = LockfileBuilder {
             http_client,
             config,
-            package_cache: HashMap::new(),
+            registry_metadata_cache,
             packages: HashMap::new(),
         };
 
@@ -62,7 +70,7 @@ impl<'a> GenerateLockfile<'a> {
 struct LockfileBuilder<'a> {
     http_client: &'a ThrottledClient,
     config: &'static Npmrc,
-    package_cache: HashMap<String, Package>,
+    registry_metadata_cache: &'a RegistryMetadataCache,
     packages: HashMap<DependencyPath, PackageSnapshot>,
 }
 
@@ -106,41 +114,14 @@ impl<'a> LockfileBuilder<'a> {
         name: &str,
         version_range: &str,
     ) -> Result<PackageVersion, RegistryError> {
-        if version_range == "latest" {
-            return PackageVersion::fetch_from_registry(
-                name,
-                PackageTag::Latest,
-                self.http_client,
-                &self.config.registry,
-            )
-            .await;
-        }
-
-        if let Ok(version) = version_range.parse() {
-            return PackageVersion::fetch_from_registry(
-                name,
-                PackageTag::Version(version),
-                self.http_client,
-                &self.config.registry,
-            )
-            .await;
-        }
-
-        let package = self.fetch_package(name).await?;
-        package.pinned_version(version_range).cloned().ok_or_else(|| {
-            RegistryError::MissingVersionRelease(version_range.to_string(), name.to_string())
-        })
-    }
-
-    async fn fetch_package(&mut self, name: &str) -> Result<Package, RegistryError> {
-        if let Some(package) = self.package_cache.get(name) {
-            return Ok(package.clone());
-        }
-
-        let package =
-            Package::fetch_from_registry(name, self.http_client, &self.config.registry).await?;
-        self.package_cache.insert(name.to_string(), package.clone());
-        Ok(package)
+        let package = fetch_package_metadata(
+            self.registry_metadata_cache,
+            name,
+            self.http_client,
+            &self.config.registry,
+        )
+        .await?;
+        package.version_by_specifier(version_range).cloned()
     }
 
     fn package_specifier(&self, package: &PackageVersion) -> PkgNameVerPeer {

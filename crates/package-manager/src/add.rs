@@ -1,12 +1,13 @@
-use crate::{Install, ResolvedPackages};
+use crate::{fetch_package_metadata, Install, RegistryMetadataCache, ResolvedPackages};
 use derive_more::{Display, Error};
+use futures_util::future::join_all;
 use miette::Diagnostic;
 use pacquet_lockfile::Lockfile;
 use pacquet_network::ThrottledClient;
 use pacquet_npmrc::Npmrc;
 use pacquet_package_manifest::PackageManifestError;
 use pacquet_package_manifest::{DependencyGroup, PackageManifest};
-use pacquet_registry::{PackageTag, PackageVersion};
+use pacquet_registry::RegistryError;
 use pacquet_tarball::MemCache;
 
 /// This subroutine does everything `pacquet add` is supposed to do.
@@ -23,8 +24,9 @@ where
     pub manifest: &'a mut PackageManifest,
     pub lockfile: Option<&'a Lockfile>,
     pub list_dependency_groups: ListDependencyGroups, // must be a function because it is called multiple times
-    pub package_name: &'a str, // TODO: 1. support version range, 2. multiple arguments, 3. name this `packages`
-    pub save_exact: bool,      // TODO: add `save-exact` to `.npmrc`, merge configs, and remove this
+    pub packages: &'a [String],
+    pub save_exact: bool, // TODO: add `save-exact` to `.npmrc`, merge configs, and remove this
+    pub registry_metadata_cache: &'a RegistryMetadataCache,
 }
 
 /// Error type of [`Add`].
@@ -34,6 +36,8 @@ pub enum AddError {
     AddDependencyToManifest(#[error(source)] PackageManifestError),
     #[display("Failed save the manifest file: {_0}")]
     SaveManifest(#[error(source)] PackageManifestError),
+    #[display("Failed to resolve package metadata: {_0}")]
+    FetchFromRegistry(#[error(source)] RegistryError),
 }
 
 impl<'a, ListDependencyGroups, DependencyGroupList>
@@ -50,25 +54,41 @@ where
             manifest,
             lockfile,
             list_dependency_groups,
-            package_name,
+            packages,
             save_exact,
             resolved_packages,
+            registry_metadata_cache,
         } = self;
 
-        let latest_version = PackageVersion::fetch_from_registry(
-            package_name,
-            PackageTag::Latest, // TODO: add support for specifying tags
-            http_client,
-            &config.registry,
-        )
-        .await
-        .expect("resolve latest tag"); // TODO: properly propagate this error
+        let resolved_specs = join_all(packages.iter().map(|package| async move {
+            let ParsedPackageSpec { name, specifier } = ParsedPackageSpec::parse(package);
+            let version_range = match specifier {
+                Some(specifier) => specifier.to_string(),
+                None => {
+                    let package = fetch_package_metadata(
+                        registry_metadata_cache,
+                        name,
+                        http_client,
+                        &config.registry,
+                    )
+                    .await
+                    .map_err(AddError::FetchFromRegistry)?;
+                    package
+                        .version_by_specifier("latest")
+                        .map_err(AddError::FetchFromRegistry)?
+                        .serialize(save_exact)
+                }
+            };
+            Ok::<_, AddError>((name, version_range))
+        }))
+        .await;
 
-        let version_range = latest_version.serialize(save_exact);
-        for dependency_group in list_dependency_groups() {
-            manifest
-                .add_dependency(package_name, &version_range, dependency_group)
-                .map_err(AddError::AddDependencyToManifest)?;
+        for (name, version_range) in resolved_specs.into_iter().collect::<Result<Vec<_>, _>>()? {
+            for dependency_group in list_dependency_groups() {
+                manifest
+                    .add_dependency(name, &version_range, dependency_group)
+                    .map_err(AddError::AddDependencyToManifest)?;
+            }
         }
 
         Install {
@@ -80,6 +100,7 @@ where
             dependency_groups: list_dependency_groups(),
             frozen_lockfile: false,
             resolved_packages,
+            registry_metadata_cache,
         }
         .run()
         .await;
@@ -87,5 +108,66 @@ where
         manifest.save().map_err(AddError::SaveManifest)?;
 
         Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ParsedPackageSpec<'a> {
+    name: &'a str,
+    specifier: Option<&'a str>,
+}
+
+impl<'a> ParsedPackageSpec<'a> {
+    fn parse(input: &'a str) -> Self {
+        let separator = input
+            .char_indices()
+            .skip(1)
+            .filter_map(|(index, ch)| (ch == '@').then_some(index))
+            .last()
+            .filter(|index| index + 1 < input.len());
+
+        let (name, specifier) = separator
+            .map(|index| (&input[..index], Some(&input[index + 1..])))
+            .unwrap_or((input, None));
+
+        Self { name, specifier }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ParsedPackageSpec;
+    use pretty_assertions::assert_eq;
+
+    #[test]
+    fn should_parse_unscoped_package_specs() {
+        assert_eq!(
+            ParsedPackageSpec::parse("react"),
+            ParsedPackageSpec { name: "react", specifier: None },
+        );
+        assert_eq!(
+            ParsedPackageSpec::parse("react@18.3.1"),
+            ParsedPackageSpec { name: "react", specifier: Some("18.3.1") },
+        );
+        assert_eq!(
+            ParsedPackageSpec::parse("react@latest"),
+            ParsedPackageSpec { name: "react", specifier: Some("latest") },
+        );
+    }
+
+    #[test]
+    fn should_parse_scoped_package_specs() {
+        assert_eq!(
+            ParsedPackageSpec::parse("@scope/example"),
+            ParsedPackageSpec { name: "@scope/example", specifier: None },
+        );
+        assert_eq!(
+            ParsedPackageSpec::parse("@scope/example@1.2.3"),
+            ParsedPackageSpec { name: "@scope/example", specifier: Some("1.2.3") },
+        );
+        assert_eq!(
+            ParsedPackageSpec::parse("@scope/example@^1"),
+            ParsedPackageSpec { name: "@scope/example", specifier: Some("^1") },
+        );
     }
 }

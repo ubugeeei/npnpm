@@ -3,16 +3,13 @@ pub use _utils::*;
 
 use assert_cmd::prelude::*;
 use command_extra::CommandExtra;
+use pacquet_package_manifest::PackageManifest;
 use pacquet_testing_utils::{
     bin::{AddMockedRegistry, CommandTempCwd},
-    fixtures::{BIG_LOCKFILE, BIG_MANIFEST},
-    fs::{get_all_files, get_all_folders, is_symlink_or_junction},
+    fs::{get_all_files, get_all_folders, get_filenames_in_folder, is_symlink_or_junction},
 };
 use pipe_trait::Pipe;
-use std::{
-    fs::{self, OpenOptions},
-    io::Write,
-};
+use std::fs;
 
 #[test]
 fn should_install_dependencies() {
@@ -140,6 +137,9 @@ fn should_install_index_files() {
 #[cfg(not(target_os = "macos"))] // It causes ConnectionReset on CI
 #[test]
 fn frozen_lockfile_should_be_able_to_handle_big_lockfile() {
+    use pacquet_testing_utils::fixtures::{BIG_LOCKFILE, BIG_MANIFEST};
+    use std::{fs::OpenOptions, io::Write};
+
     let CommandTempCwd { pacquet, root, workspace, npmrc_info, .. } =
         CommandTempCwd::init().add_mocked_registry();
     let AddMockedRegistry { mock_instance, .. } = npmrc_info;
@@ -189,6 +189,63 @@ fn should_install_circular_dependencies() {
     assert!(workspace.join("./node_modules/@pnpm.e2e/circular-deps-1-of-2").exists());
     assert!(workspace.join("./node_modules/.pnpm/@pnpm.e2e+circular-deps-1-of-2@1.0.2").exists());
     assert!(workspace.join("./node_modules/.pnpm/@pnpm.e2e+circular-deps-2-of-2@1.0.2").exists());
+
+    drop((root, mock_instance)); // cleanup
+}
+
+#[test]
+fn should_create_bin_links() {
+    let CommandTempCwd { pacquet, root, workspace, npmrc_info, .. } =
+        CommandTempCwd::init().add_mocked_registry();
+    let AddMockedRegistry { mock_instance, .. } = npmrc_info;
+
+    eprintln!("Creating package.json...");
+    let manifest_path = workspace.join("package.json");
+    let package_json_content = serde_json::json!({
+        "dependencies": {
+            "@pnpm.e2e/hello-world-js-bin": "1.0.0",
+            "@pnpm.e2e/hello-world-js-bin-parent": "1.0.0",
+        },
+    });
+    fs::write(manifest_path, package_json_content.to_string()).expect("write to package.json");
+
+    eprintln!("Executing command...");
+    pacquet.with_arg("install").assert().success();
+
+    let root_bin_dir = workspace.join("node_modules/.bin");
+    let root_bins = get_filenames_in_folder(&root_bin_dir);
+    assert!(
+        !root_bins.is_empty(),
+        "expected at least one root .bin entry after installing a bin package"
+    );
+
+    let mut direct_bins = [
+        workspace.join("node_modules/@pnpm.e2e/hello-world-js-bin/package.json"),
+        workspace.join("node_modules/@pnpm.e2e/hello-world-js-bin-parent/package.json"),
+    ]
+    .into_iter()
+    .flat_map(|manifest_path| {
+        PackageManifest::from_path(manifest_path)
+            .expect("load direct dependency manifest")
+            .bin_entries()
+            .expect("read direct dependency bin entries")
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>()
+    })
+    .collect::<Vec<_>>();
+    direct_bins.sort();
+    direct_bins.dedup();
+
+    assert_eq!(root_bins, direct_bins);
+
+    let nested_bin_dir = workspace
+        .join("node_modules/.pnpm/@pnpm.e2e+hello-world-js-bin-parent@1.0.0/node_modules/.bin");
+    let nested_bins = get_filenames_in_folder(&nested_bin_dir);
+    assert!(
+        !nested_bins.is_empty(),
+        "expected nested dependency .bin entries inside the virtual store"
+    );
 
     drop((root, mock_instance)); // cleanup
 }

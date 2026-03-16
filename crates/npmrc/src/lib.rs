@@ -3,7 +3,10 @@ mod custom_deserializer;
 use pacquet_store_dir::StoreDir;
 use pipe_trait::Pipe;
 use serde::Deserialize;
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use crate::custom_deserializer::{
     bool_true, default_hoist_pattern, default_modules_cache_max_age, default_modules_dir,
@@ -175,18 +178,24 @@ impl Npmrc {
         // TODO: this code makes no sense.
         // TODO: it should have merged the settings.
 
-        let load = |dir: PathBuf| -> Option<Npmrc> {
-            dir.join(".npmrc")
-                .pipe(fs::read_to_string)
-                .ok()? // TODO: should it throw error instead?
-                .pipe_as_ref(serde_ini::from_str)
-                .ok() // TODO: should it throw error instead?
+        let project_dir = current_dir().ok();
+        let default = || {
+            let mut config = default();
+            if let Some(project_dir) = &project_dir {
+                apply_project_dir_defaults(&mut config, project_dir);
+            }
+            config
         };
 
-        current_dir()
-            .ok()
-            .and_then(load)
-            .or_else(|| home_dir().and_then(load))
+        project_dir
+            .as_ref()
+            .and_then(|dir| load_npmrc(dir, dir))
+            .or_else(|| {
+                home_dir().and_then(|config_dir| {
+                    let project_dir = project_dir.as_deref().unwrap_or(&config_dir);
+                    load_npmrc(project_dir, &config_dir)
+                })
+            })
             .unwrap_or_else(default)
     }
 
@@ -202,9 +211,80 @@ impl Default for Npmrc {
     }
 }
 
+#[derive(Default)]
+struct PathFieldPresence {
+    modules_dir: bool,
+    virtual_store_dir: bool,
+}
+
+fn load_npmrc(project_dir: &Path, config_dir: &Path) -> Option<Npmrc> {
+    let npmrc_path = config_dir.join(".npmrc");
+    let npmrc_text = fs::read_to_string(npmrc_path).ok()?;
+    let (npmrc_text, presence) = normalize_npmrc_text(&npmrc_text, config_dir);
+    let mut config = serde_ini::from_str::<Npmrc>(&npmrc_text).ok()?;
+
+    if !presence.modules_dir {
+        config.modules_dir = project_dir.join("node_modules");
+    }
+    if !presence.virtual_store_dir {
+        config.virtual_store_dir = project_dir.join("node_modules/.pnpm");
+    }
+
+    Some(config)
+}
+
+fn normalize_npmrc_text(text: &str, config_dir: &Path) -> (String, PathFieldPresence) {
+    let mut presence = PathFieldPresence::default();
+    let normalized = text
+        .lines()
+        .map(|line| normalize_npmrc_line(line, config_dir, &mut presence))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    (normalized, presence)
+}
+
+fn normalize_npmrc_line(line: &str, config_dir: &Path, presence: &mut PathFieldPresence) -> String {
+    let Some((key, value)) = line.split_once('=') else {
+        return line.to_string();
+    };
+
+    let value = value.trim();
+    let normalize_path_value = || {
+        let path = Path::new(value);
+        if path.is_absolute() {
+            value.to_string()
+        } else {
+            config_dir.join(path).to_string_lossy().to_string()
+        }
+    };
+
+    match key.trim() {
+        "modules-dir" => {
+            presence.modules_dir = true;
+            format!("{key}={}", normalize_path_value())
+        }
+        "virtual-store-dir" => {
+            presence.virtual_store_dir = true;
+            format!("{key}={}", normalize_path_value())
+        }
+        "store-dir" => format!("{key}={}", normalize_path_value()),
+        _ => line.to_string(),
+    }
+}
+
+fn apply_project_dir_defaults(config: &mut Npmrc, project_dir: &Path) {
+    config.modules_dir = project_dir.join("node_modules");
+    config.virtual_store_dir = project_dir.join("node_modules/.pnpm");
+}
+
 #[cfg(test)]
 mod tests {
-    use std::{env, str::FromStr};
+    use std::{
+        env,
+        str::FromStr,
+        sync::{Mutex, OnceLock},
+    };
 
     use pretty_assertions::assert_eq;
     use tempfile::tempdir;
@@ -213,6 +293,11 @@ mod tests {
 
     fn display_store_dir(store_dir: &StoreDir) -> String {
         store_dir.display().to_string().replace('\\', "/")
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
     }
 
     #[test]
@@ -253,7 +338,9 @@ mod tests {
 
     #[test]
     pub fn should_use_pnpm_home_env_var() {
+        let _guard = env_lock().lock().unwrap();
         env::set_var("PNPM_HOME", "/hello"); // TODO: change this to dependency injection
+        env::remove_var("XDG_DATA_HOME");
         let value: Npmrc = serde_ini::from_str("").unwrap();
         assert_eq!(display_store_dir(&value.store_dir), "/hello/store");
         env::remove_var("PNPM_HOME");
@@ -261,6 +348,8 @@ mod tests {
 
     #[test]
     pub fn should_use_xdg_data_home_env_var() {
+        let _guard = env_lock().lock().unwrap();
+        env::remove_var("PNPM_HOME");
         env::set_var("XDG_DATA_HOME", "/hello"); // TODO: change this to dependency injection
         let value: Npmrc = serde_ini::from_str("").unwrap();
         assert_eq!(display_store_dir(&value.store_dir), "/hello/pnpm/store");
@@ -326,6 +415,32 @@ mod tests {
             || unreachable!("shouldn't reach home dir"),
         );
         assert!(!config.symlink);
+    }
+
+    #[test]
+    pub fn test_current_folder_resolves_relative_paths_from_current_npmrc() {
+        let current_dir = tempdir().unwrap();
+        let app_dir = current_dir.path().join("app");
+        fs::create_dir_all(&app_dir).unwrap();
+        fs::write(app_dir.join(".npmrc"), "modules-dir=app_modules").expect("write to .npmrc");
+
+        let config = Npmrc::current(|| app_dir.clone().pipe(Ok::<_, ()>), || None, Npmrc::new);
+        assert_eq!(config.modules_dir, app_dir.join("app_modules"));
+    }
+
+    #[test]
+    pub fn test_home_npmrc_keeps_project_relative_defaults() {
+        let current_dir = tempdir().unwrap();
+        let home_dir = tempdir().unwrap();
+        fs::write(home_dir.path().join(".npmrc"), "symlink=false").expect("write to .npmrc");
+
+        let config = Npmrc::current(
+            || current_dir.path().to_path_buf().pipe(Ok::<_, ()>),
+            || home_dir.path().to_path_buf().pipe(Some),
+            Npmrc::new,
+        );
+        assert_eq!(config.modules_dir, current_dir.path().join("node_modules"));
+        assert_eq!(config.virtual_store_dir, current_dir.path().join("node_modules/.pnpm"));
     }
 
     #[test]

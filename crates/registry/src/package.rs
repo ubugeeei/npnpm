@@ -7,7 +7,7 @@ use pacquet_network::ThrottledClient;
 use pipe_trait::Pipe;
 use serde::{Deserialize, Serialize};
 
-use crate::{package_version::PackageVersion, NetworkError, RegistryError};
+use crate::{package_version::PackageVersion, NetworkError, PackageTag, RegistryError};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Package {
@@ -54,17 +54,43 @@ impl Package {
 
     pub fn pinned_version(&self, version_range: &str) -> Option<&PackageVersion> {
         let range: node_semver::Range = version_range.parse().unwrap(); // TODO: this step should have happened in PackageManifest
-        let mut satisfied_versions = self
-            .versions
+        self.versions
             .values()
-            .filter(|v| v.version.satisfies(&range))
-            .collect::<Vec<&PackageVersion>>();
+            .filter(|version| version.version.satisfies(&range))
+            .max_by(|left, right| left.version.partial_cmp(&right.version).unwrap())
+    }
 
-        satisfied_versions.sort_by(|a, b| a.version.partial_cmp(&b.version).unwrap());
+    pub fn version_by_tag(&self, tag: PackageTag) -> Result<&PackageVersion, RegistryError> {
+        match tag {
+            PackageTag::Latest => {
+                let version = self
+                    .dist_tags
+                    .get("latest")
+                    .ok_or_else(|| RegistryError::MissingLatestTag(self.name.clone()))?;
+                self.versions.get(version).ok_or_else(|| {
+                    RegistryError::MissingVersionRelease(version.clone(), self.name.clone())
+                })
+            }
+            PackageTag::Version(version) => {
+                let version = version.to_string();
+                self.versions
+                    .get(&version)
+                    .ok_or_else(|| RegistryError::MissingVersionRelease(version, self.name.clone()))
+            }
+        }
+    }
 
-        // Optimization opportunity:
-        // We can store this in a cache to remove filter operation and make this a O(1) operation.
-        satisfied_versions.last().copied()
+    pub fn version_by_specifier(
+        &self,
+        version_range: &str,
+    ) -> Result<&PackageVersion, RegistryError> {
+        if let Ok(tag) = version_range.parse::<PackageTag>() {
+            return self.version_by_tag(tag);
+        }
+
+        self.pinned_version(version_range).ok_or_else(|| {
+            RegistryError::MissingVersionRelease(version_range.to_string(), self.name.clone())
+        })
     }
 
     pub fn latest(&self) -> &PackageVersion {
@@ -122,5 +148,53 @@ mod tests {
 
         assert_eq!(version.serialize(true), "3.2.1");
         assert_eq!(version.serialize(false), "^3.2.1");
+    }
+
+    #[test]
+    fn version_by_specifier_prefers_direct_lookups_before_range_resolution() {
+        let package = Package {
+            name: "demo".to_string(),
+            dist_tags: HashMap::from([("latest".to_string(), "1.2.0".to_string())]),
+            versions: HashMap::from([
+                (
+                    "1.0.0".to_string(),
+                    PackageVersion {
+                        name: "demo".to_string(),
+                        version: Version::parse("1.0.0").unwrap(),
+                        dist: PackageDistribution::default(),
+                        dependencies: None,
+                        optional_dependencies: None,
+                        dev_dependencies: None,
+                        peer_dependencies: None,
+                    },
+                ),
+                (
+                    "1.2.0".to_string(),
+                    PackageVersion {
+                        name: "demo".to_string(),
+                        version: Version::parse("1.2.0").unwrap(),
+                        dist: PackageDistribution::default(),
+                        dependencies: None,
+                        optional_dependencies: None,
+                        dev_dependencies: None,
+                        peer_dependencies: None,
+                    },
+                ),
+            ]),
+            mutex: Default::default(),
+        };
+
+        assert_eq!(
+            package.version_by_specifier("latest").unwrap().version,
+            Version::parse("1.2.0").unwrap()
+        );
+        assert_eq!(
+            package.version_by_specifier("1.0.0").unwrap().version,
+            Version::parse("1.0.0").unwrap()
+        );
+        assert_eq!(
+            package.version_by_specifier("^1.0.0").unwrap().version,
+            Version::parse("1.2.0").unwrap()
+        );
     }
 }

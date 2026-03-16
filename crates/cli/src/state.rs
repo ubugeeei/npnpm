@@ -3,7 +3,7 @@ use miette::Diagnostic;
 use pacquet_lockfile::{LoadLockfileError, Lockfile};
 use pacquet_network::ThrottledClient;
 use pacquet_npmrc::Npmrc;
-use pacquet_package_manager::ResolvedPackages;
+use pacquet_package_manager::{RegistryMetadataCache, ResolvedPackages};
 use pacquet_package_manifest::{PackageManifest, PackageManifestError};
 use pacquet_tarball::MemCache;
 use pipe_trait::Pipe;
@@ -23,6 +23,8 @@ pub struct State {
     pub lockfile: Option<Lockfile>,
     /// In-memory cache for packages that have started resolving dependencies.
     pub resolved_packages: ResolvedPackages,
+    /// Shared registry metadata cache reused across add/install flows.
+    pub registry_metadata_cache: RegistryMetadataCache,
 }
 
 /// Error type of [`State::init`].
@@ -54,6 +56,7 @@ impl State {
             http_client: ThrottledClient::new_from_cpu_count(),
             tarball_mem_cache: MemCache::new(),
             resolved_packages: ResolvedPackages::new(),
+            registry_metadata_cache: RegistryMetadataCache::new(),
         })
     }
 }

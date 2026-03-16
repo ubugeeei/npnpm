@@ -1,11 +1,14 @@
-use crate::{create_cas_files, symlink_package, CreateCasFilesError, SymlinkPackageError};
+use crate::{
+    create_cas_files, fetch_package_metadata, symlink_package, CreateCasFilesError,
+    RegistryMetadataCache, SymlinkPackageError,
+};
 use derive_more::{Display, Error};
 use miette::Diagnostic;
 use pacquet_network::ThrottledClient;
 use pacquet_npmrc::Npmrc;
-use pacquet_registry::{Package, PackageTag, PackageVersion, RegistryError};
+use pacquet_registry::{PackageVersion, RegistryError};
 use pacquet_tarball::{DownloadTarballToStore, MemCache, TarballError};
-use std::{path::Path, str::FromStr};
+use std::path::Path;
 
 /// This subroutine executes the following and returns the package
 /// * Retrieves the package from the registry
@@ -23,6 +26,7 @@ pub struct InstallPackageFromRegistry<'a> {
     pub node_modules_dir: &'a Path,
     pub name: &'a str,
     pub version_range: &'a str,
+    pub registry_metadata_cache: &'a RegistryMetadataCache,
 }
 
 /// Error type of [`InstallPackageFromRegistry`].
@@ -36,31 +40,27 @@ pub enum InstallPackageFromRegistryError {
 
 impl<'a> InstallPackageFromRegistry<'a> {
     /// Execute the subroutine.
-    pub async fn run<Tag>(self) -> Result<PackageVersion, InstallPackageFromRegistryError>
-    where
-        Tag: FromStr + Into<PackageTag>,
-    {
-        let &InstallPackageFromRegistry { http_client, config, name, version_range, .. } = &self;
+    pub async fn run(self) -> Result<PackageVersion, InstallPackageFromRegistryError> {
+        let &InstallPackageFromRegistry {
+            http_client,
+            config,
+            name,
+            version_range,
+            registry_metadata_cache,
+            ..
+        } = &self;
 
-        Ok(if let Ok(tag) = version_range.parse::<Tag>() {
-            let package_version = PackageVersion::fetch_from_registry(
-                name,
-                tag.into(),
-                http_client,
-                &config.registry,
-            )
-            .await
-            .map_err(InstallPackageFromRegistryError::FetchFromRegistry)?;
-            self.install_package_version(&package_version).await?;
-            package_version
-        } else {
-            let package = Package::fetch_from_registry(name, http_client, &config.registry)
+        let package =
+            fetch_package_metadata(registry_metadata_cache, name, http_client, &config.registry)
                 .await
                 .map_err(InstallPackageFromRegistryError::FetchFromRegistry)?;
-            let package_version = package.pinned_version(version_range).unwrap(); // TODO: propagate error for when no version satisfies range
-            self.install_package_version(package_version).await?;
-            package_version.clone()
-        })
+        let package_version = package
+            .version_by_specifier(version_range)
+            .map_err(InstallPackageFromRegistryError::FetchFromRegistry)?
+            .clone();
+
+        self.install_package_version(&package_version).await?;
+        Ok(package_version)
     }
 
     async fn install_package_version(
@@ -159,6 +159,7 @@ mod tests {
                 .pipe(Box::new)
                 .pipe(Box::leak);
         let http_client = ThrottledClient::new_from_cpu_count();
+        let registry_metadata_cache = RegistryMetadataCache::new();
         let package = InstallPackageFromRegistry {
             tarball_mem_cache: &Default::default(),
             config,
@@ -166,8 +167,9 @@ mod tests {
             name: "fast-querystring",
             version_range: "1.0.0",
             node_modules_dir: modules_dir.path(),
+            registry_metadata_cache: &registry_metadata_cache,
         }
-        .run::<Version>()
+        .run()
         .await
         .unwrap();
 
