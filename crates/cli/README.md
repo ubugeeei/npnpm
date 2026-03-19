@@ -44,7 +44,7 @@ This file tracks the path toward full pnpm CLI compatibility.
 | ---- | --------------------------- | ----- |
 |      | --force                     |       |
 | ✅   | --offline                   | lockfile + store reuse path |
-| ~    | --prefer-offline            | accepted, but persistent metadata cache is still missing |
+| ✅   | --prefer-offline            | reuses persisted registry metadata + store contents |
 |      | --prod                      |       |
 | ✅   | --dev                       |       |
 | ✅   | --no-optional               |       |

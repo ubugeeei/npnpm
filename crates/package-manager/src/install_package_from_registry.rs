@@ -1,6 +1,6 @@
 use crate::{
     create_cas_files, fetch_package_metadata, symlink_package, CreateCasFilesError,
-    RegistryMetadataCache, SymlinkPackageError,
+    RegistryMetadataCache, RegistryMetadataMode, SymlinkPackageError,
 };
 use derive_more::{Display, Error};
 use miette::Diagnostic;
@@ -27,6 +27,7 @@ pub struct InstallPackageFromRegistry<'a> {
     pub name: &'a str,
     pub version_range: &'a str,
     pub registry_metadata_cache: &'a RegistryMetadataCache,
+    pub registry_metadata_mode: RegistryMetadataMode,
 }
 
 /// Error type of [`InstallPackageFromRegistry`].
@@ -47,13 +48,20 @@ impl<'a> InstallPackageFromRegistry<'a> {
             name,
             version_range,
             registry_metadata_cache,
+            registry_metadata_mode,
             ..
         } = &self;
 
-        let package =
-            fetch_package_metadata(registry_metadata_cache, name, http_client, &config.registry)
-                .await
-                .map_err(InstallPackageFromRegistryError::FetchFromRegistry)?;
+        let package = fetch_package_metadata(
+            registry_metadata_cache,
+            name,
+            http_client,
+            &config.registry,
+            &config.store_dir,
+            registry_metadata_mode,
+        )
+        .await
+        .map_err(InstallPackageFromRegistryError::FetchFromRegistry)?;
         let package_version = package
             .version_by_specifier(version_range)
             .map_err(InstallPackageFromRegistryError::FetchFromRegistry)?
@@ -169,6 +177,7 @@ mod tests {
             version_range: "1.0.0",
             node_modules_dir: modules_dir.path(),
             registry_metadata_cache: &registry_metadata_cache,
+            registry_metadata_mode: RegistryMetadataMode::Online,
         }
         .run()
         .await

@@ -71,6 +71,7 @@ where
             ],
             frozen_lockfile: false,
             offline: false,
+            prefer_offline: false,
         }
         .run()
         .await;

@@ -1,6 +1,6 @@
 use crate::{
     CreateBins, GenerateLockfile, InstallFrozenLockfile, InstallWithoutLockfile,
-    RegistryMetadataCache, ResolvedPackages,
+    RegistryMetadataCache, RegistryMetadataMode, ResolvedPackages,
 };
 use pacquet_lockfile::{Lockfile, RootProjectSnapshot};
 use pacquet_network::ThrottledClient;
@@ -25,6 +25,7 @@ where
     pub frozen_lockfile: bool,
     pub registry_metadata_cache: &'a RegistryMetadataCache,
     pub offline: bool,
+    pub prefer_offline: bool,
 }
 
 impl<'a, DependencyGroupList> Install<'a, DependencyGroupList>
@@ -96,6 +97,7 @@ where
             frozen_lockfile,
             registry_metadata_cache,
             offline,
+            prefer_offline,
         } = self;
         let dependency_groups = dependency_groups.into_iter().collect::<Vec<_>>();
 
@@ -131,6 +133,9 @@ where
                     manifest,
                     dependency_groups,
                     registry_metadata_cache,
+                    registry_metadata_mode: prefer_offline
+                        .then_some(RegistryMetadataMode::PreferOffline)
+                        .unwrap_or(RegistryMetadataMode::Online),
                 }
                 .run()
                 .await;
@@ -170,6 +175,9 @@ where
                     manifest,
                     dependency_groups: &dependency_groups,
                     registry_metadata_cache,
+                    registry_metadata_mode: prefer_offline
+                        .then_some(RegistryMetadataMode::PreferOffline)
+                        .unwrap_or(RegistryMetadataMode::Online),
                 }
                 .run()
                 .await
@@ -259,6 +267,7 @@ mod tests {
             resolved_packages: &Default::default(),
             registry_metadata_cache: &registry_metadata_cache,
             offline: false,
+            prefer_offline: false,
         }
         .run()
         .await;
@@ -318,6 +327,7 @@ mod tests {
             resolved_packages: &resolved_packages,
             registry_metadata_cache: &registry_metadata_cache,
             offline: false,
+            prefer_offline: false,
         }
         .run()
         .await;
@@ -341,6 +351,7 @@ mod tests {
             resolved_packages: &resolved_packages,
             registry_metadata_cache: &registry_metadata_cache,
             offline: false,
+            prefer_offline: false,
         }
         .run()
         .await;

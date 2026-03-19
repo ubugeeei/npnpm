@@ -1,4 +1,7 @@
-use crate::{sync_direct_dependency_links, InstallPackageFromRegistry, RegistryMetadataCache};
+use crate::{
+    sync_direct_dependency_links, InstallPackageFromRegistry, RegistryMetadataCache,
+    RegistryMetadataMode,
+};
 use async_recursion::async_recursion;
 use dashmap::DashSet;
 use futures_util::future;
@@ -33,6 +36,7 @@ pub struct InstallWithoutLockfile<'a, DependencyGroupList> {
     pub manifest: &'a PackageManifest,
     pub dependency_groups: DependencyGroupList,
     pub registry_metadata_cache: &'a RegistryMetadataCache,
+    pub registry_metadata_mode: RegistryMetadataMode,
 }
 
 impl<'a, DependencyGroupList> InstallWithoutLockfile<'a, DependencyGroupList> {
@@ -49,6 +53,7 @@ impl<'a, DependencyGroupList> InstallWithoutLockfile<'a, DependencyGroupList> {
             dependency_groups,
             resolved_packages,
             registry_metadata_cache,
+            registry_metadata_mode,
         } = self;
         let dependency_groups = dependency_groups.into_iter().collect::<Vec<_>>();
 
@@ -63,6 +68,7 @@ impl<'a, DependencyGroupList> InstallWithoutLockfile<'a, DependencyGroupList> {
                     name,
                     version_range,
                     registry_metadata_cache,
+                    registry_metadata_mode,
                 }
                 .run()
                 .await
@@ -76,6 +82,7 @@ impl<'a, DependencyGroupList> InstallWithoutLockfile<'a, DependencyGroupList> {
                     dependency_groups: (),
                     resolved_packages,
                     registry_metadata_cache,
+                    registry_metadata_mode,
                 }
                 .install_dependencies_from_registry(&dependency)
                 .await;
@@ -93,7 +100,7 @@ impl<'a, DependencyGroupList> InstallWithoutLockfile<'a, DependencyGroupList> {
 
 impl<'a> InstallWithoutLockfile<'a, ()> {
     /// Install dependencies of a dependency.
-    #[async_recursion]
+    #[async_recursion(?Send)]
     async fn install_dependencies_from_registry(&self, package: &PackageVersion) {
         let InstallWithoutLockfile {
             tarball_mem_cache,
@@ -101,6 +108,7 @@ impl<'a> InstallWithoutLockfile<'a, ()> {
             config,
             resolved_packages,
             registry_metadata_cache,
+            registry_metadata_mode,
             ..
         } = self;
 
@@ -129,6 +137,7 @@ impl<'a> InstallWithoutLockfile<'a, ()> {
                     name,
                     version_range,
                     registry_metadata_cache,
+                    registry_metadata_mode: *registry_metadata_mode,
                 }
                 .run()
                 .await

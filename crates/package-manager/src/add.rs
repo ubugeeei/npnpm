@@ -1,5 +1,6 @@
 use crate::{
-    fetch_package_metadata, Install, ParsedPackageSpec, RegistryMetadataCache, ResolvedPackages,
+    fetch_package_metadata, Install, ParsedPackageSpec, RegistryMetadataCache,
+    RegistryMetadataMode, ResolvedPackages,
 };
 use derive_more::{Display, Error};
 use futures_util::future::join_all;
@@ -72,6 +73,8 @@ where
                         name,
                         http_client,
                         &config.registry,
+                        &config.store_dir,
+                        RegistryMetadataMode::Online,
                     )
                     .await
                     .map_err(AddError::FetchFromRegistry)?;
@@ -104,6 +107,7 @@ where
             resolved_packages,
             registry_metadata_cache,
             offline: false,
+            prefer_offline: false,
         }
         .run()
         .await;

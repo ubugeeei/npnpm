@@ -307,3 +307,68 @@ fn fetch_prod_should_skip_dev_packages() {
 
     drop(root);
 }
+
+#[test]
+fn install_prefer_offline_should_reuse_persisted_metadata_cache() {
+    let CommandTempCwd { root, workspace, .. } = CommandTempCwd::init();
+    let tarball = fixture_tarball();
+    let integrity: Integrity =
+        "sha512-dj7vjIn1Ar8sVXj2yAXiMNCJDmS9MQ9XMlIecX2dIzzhjSHCyKo4DdXjXMs7wKW2kj6yvVRSpuQjOZ3YLrh56w=="
+            .parse()
+            .expect("parse tarball integrity");
+
+    let mut server = mockito::Server::new();
+    let registry = format!("{}/", server.url());
+    fs::write(workspace.join(".npmrc"), format!("store-dir=foo/bar\nregistry={registry}\n"))
+        .expect("write to .npmrc");
+    fs::write(
+        workspace.join("package.json"),
+        serde_json::json!({
+            "dependencies": {
+                "root": "1.0.0"
+            }
+        })
+        .to_string(),
+    )
+    .expect("write package.json");
+
+    let package = serde_json::json!({
+        "name": "root",
+        "dist-tags": { "latest": "1.0.0" },
+        "versions": {
+            "1.0.0": {
+                "name": "root",
+                "version": "1.0.0",
+                "dist": {
+                    "tarball": format!("{}/root/-/root-1.0.0.tgz", server.url()),
+                    "integrity": integrity.to_string(),
+                    "unpackedSize": 16697
+                }
+            }
+        }
+    });
+
+    server
+        .mock("GET", "/root")
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(package.to_string())
+        .expect(1)
+        .create();
+    server
+        .mock("GET", "/root/-/root-1.0.0.tgz")
+        .with_status(200)
+        .with_body(tarball)
+        .expect(1)
+        .create();
+
+    pacquet_command(&workspace).with_arg("install").assert().success();
+    fs::remove_dir_all(workspace.join("node_modules")).expect("remove node_modules");
+    drop(server);
+
+    pacquet_command(&workspace).with_args(["install", "--prefer-offline"]).assert().success();
+
+    assert!(workspace.join("node_modules/root").exists());
+
+    drop(root);
+}

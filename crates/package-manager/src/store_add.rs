@@ -1,4 +1,7 @@
-use crate::{fetch_package_metadata, ParsedPackageSpec, RegistryMetadataCache, ResolvedPackages};
+use crate::{
+    fetch_package_metadata, ParsedPackageSpec, RegistryMetadataCache, RegistryMetadataMode,
+    ResolvedPackages,
+};
 use async_recursion::async_recursion;
 use derive_more::{Display, Error};
 use futures_util::future::join_all;
@@ -52,6 +55,8 @@ impl<'a> StoreAdd<'a> {
                 name,
                 http_client,
                 &config.registry,
+                &config.store_dir,
+                RegistryMetadataMode::Online,
             )
             .await
             .map_err(StoreAddError::FetchFromRegistry)?;
@@ -81,7 +86,7 @@ struct StoreAdder<'a> {
 }
 
 impl<'a> StoreAdder<'a> {
-    #[async_recursion]
+    #[async_recursion(?Send)]
     async fn store_package_and_dependencies(
         &self,
         package: PackageVersion,
@@ -118,6 +123,8 @@ impl<'a> StoreAdder<'a> {
                     name,
                     self.http_client,
                     &self.config.registry,
+                    &self.config.store_dir,
+                    RegistryMetadataMode::Online,
                 )
                 .await
                 .map_err(StoreAddError::FetchFromRegistry)?;

@@ -1,4 +1,4 @@
-use crate::{fetch_package_metadata, RegistryMetadataCache};
+use crate::{fetch_package_metadata, RegistryMetadataCache, RegistryMetadataMode};
 use async_recursion::async_recursion;
 use pacquet_lockfile::{
     ComVer, DependencyPath, Lockfile, LockfileResolution, LockfileSettings, PackageSnapshot,
@@ -20,6 +20,7 @@ pub struct GenerateLockfile<'a> {
     pub manifest: &'a PackageManifest,
     pub dependency_groups: &'a [DependencyGroup],
     pub registry_metadata_cache: &'a RegistryMetadataCache,
+    pub registry_metadata_mode: RegistryMetadataMode,
 }
 
 impl<'a> GenerateLockfile<'a> {
@@ -30,12 +31,14 @@ impl<'a> GenerateLockfile<'a> {
             manifest,
             dependency_groups,
             registry_metadata_cache,
+            registry_metadata_mode,
         } = self;
 
         let mut builder = LockfileBuilder {
             http_client,
             config,
             registry_metadata_cache,
+            registry_metadata_mode,
             packages: HashMap::new(),
         };
 
@@ -71,6 +74,7 @@ struct LockfileBuilder<'a> {
     http_client: &'a ThrottledClient,
     config: &'static Npmrc,
     registry_metadata_cache: &'a RegistryMetadataCache,
+    registry_metadata_mode: RegistryMetadataMode,
     packages: HashMap<DependencyPath, PackageSnapshot>,
 }
 
@@ -119,6 +123,8 @@ impl<'a> LockfileBuilder<'a> {
             name,
             self.http_client,
             &self.config.registry,
+            &self.config.store_dir,
+            self.registry_metadata_mode,
         )
         .await?;
         package.version_by_specifier(version_range).cloned()

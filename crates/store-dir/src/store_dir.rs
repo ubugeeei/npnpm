@@ -1,6 +1,7 @@
 use derive_more::From;
 use serde::{Deserialize, Serialize};
-use sha2::{digest, Sha512};
+use sha2::{digest, Digest, Sha512};
+use std::fmt::Write;
 use std::path::{self, PathBuf};
 
 /// Content hash of a file.
@@ -37,6 +38,11 @@ impl StoreDir {
         self.root.join("v3")
     }
 
+    /// Directory used for metadata caches.
+    pub(crate) fn metadata(&self) -> PathBuf {
+        self.v3().join("metadata")
+    }
+
     /// The directory that contains all files from the once-installed packages.
     pub(crate) fn files(&self) -> PathBuf {
         self.v3().join("files")
@@ -63,6 +69,19 @@ impl StoreDir {
     pub fn tmp(&self) -> PathBuf {
         self.v3().join("tmp")
     }
+
+    /// Path to a registry metadata cache file.
+    pub fn registry_metadata_file_path(&self, registry: &str, name: &str) -> PathBuf {
+        let key = format!("{registry}\n{name}");
+        let hash = Sha512::digest(key.as_bytes());
+        let mut hex = String::with_capacity(hash.len() * 2);
+        for byte in hash {
+            write!(&mut hex, "{byte:02x}").expect("write hex");
+        }
+        let head = &hex[..2];
+        let tail = &hex[2..];
+        self.metadata().join(head).join(format!("{tail}.json"))
+    }
 }
 
 #[cfg(test)]
@@ -87,5 +106,15 @@ mod tests {
         let received = StoreDir::new("/home/user/.local/share/pnpm/store").tmp();
         let expected = PathBuf::from("/home/user/.local/share/pnpm/store/v3/tmp");
         assert_eq!(&received, &expected);
+    }
+
+    #[test]
+    fn registry_metadata_file_path() {
+        let received = StoreDir::new("/home/user/.local/share/pnpm/store")
+            .registry_metadata_file_path("https://registry.npmjs.org/", "left-pad");
+        assert!(received.starts_with(
+            "/home/user/.local/share/pnpm/store/v3/metadata".pipe(PathBuf::from).as_path()
+        ));
+        assert_eq!(received.extension().and_then(|ext| ext.to_str()), Some("json"));
     }
 }

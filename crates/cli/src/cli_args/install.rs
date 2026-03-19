@@ -69,12 +69,7 @@ impl InstallArgs {
             resolved_packages,
             registry_metadata_cache,
         } = &state;
-        let InstallArgs {
-            dependency_options,
-            frozen_lockfile,
-            offline,
-            prefer_offline: _prefer_offline,
-        } = self;
+        let InstallArgs { dependency_options, frozen_lockfile, offline, prefer_offline } = self;
         let loaded_lockfile = if lockfile.is_none() && (offline || frozen_lockfile) {
             let lockfile_dir = manifest.path().parent().unwrap_or(Path::new("."));
             Lockfile::load_from_dir(lockfile_dir).wrap_err("load pnpm-lock.yaml for install")?
@@ -94,6 +89,7 @@ impl InstallArgs {
             resolved_packages,
             registry_metadata_cache,
             offline,
+            prefer_offline,
         }
         .run()
         .await;
