@@ -26,6 +26,8 @@ where
     pub registry_metadata_cache: &'a RegistryMetadataCache,
     pub offline: bool,
     pub prefer_offline: bool,
+    pub lockfile_only: bool,
+    pub resolution_only: bool,
 }
 
 impl<'a, DependencyGroupList> Install<'a, DependencyGroupList>
@@ -58,6 +60,14 @@ where
                     snapshot_dependencies.get(*name).is_some_and(|value| value == specifier)
                 })
         })
+    }
+
+    fn lockfile_in_sync(
+        manifest: &PackageManifest,
+        lockfile: &Lockfile,
+        dependency_groups: &[DependencyGroup],
+    ) -> bool {
+        Self::lockfile_matches_manifest(manifest, lockfile, dependency_groups)
     }
 
     async fn install_from_lockfile(
@@ -98,10 +108,54 @@ where
             registry_metadata_cache,
             offline,
             prefer_offline,
+            lockfile_only,
+            resolution_only,
         } = self;
         let dependency_groups = dependency_groups.into_iter().collect::<Vec<_>>();
 
         tracing::info!(target: "pacquet::install", "Start all");
+
+        if lockfile_only || resolution_only {
+            if frozen_lockfile {
+                panic!(
+                    "--lockfile-only and --resolution-only cannot be used with --frozen-lockfile"
+                );
+            }
+            if offline {
+                panic!("--lockfile-only and --resolution-only cannot be used with --offline");
+            }
+
+            if lockfile_only
+                && !resolution_only
+                && lockfile.is_some_and(|lockfile| {
+                    Self::lockfile_in_sync(manifest, lockfile, &dependency_groups)
+                })
+            {
+                tracing::info!(
+                    target: "pacquet::install",
+                    "Skip lockfile-only resolution because pnpm-lock.yaml is already in sync"
+                );
+                return;
+            }
+
+            let generated_lockfile = GenerateLockfile {
+                http_client,
+                config,
+                manifest,
+                dependency_groups: &dependency_groups,
+                registry_metadata_cache,
+                registry_metadata_mode: prefer_offline
+                    .then_some(RegistryMetadataMode::PreferOffline)
+                    .unwrap_or(RegistryMetadataMode::Online),
+            }
+            .run()
+            .await
+            .expect("generate pnpm lockfile");
+
+            let lockfile_dir = manifest.path().parent().unwrap_or(Path::new("."));
+            generated_lockfile.save_to_dir(lockfile_dir).expect("save pnpm lockfile to workspace");
+            return;
+        }
 
         match (offline, config.lockfile, frozen_lockfile, lockfile) {
             (true, _, _, None) => {
@@ -144,6 +198,9 @@ where
                 panic!("--frozen-lockfile requires an existing pnpm-lock.yaml");
             }
             (false, true, true, Some(lockfile)) => {
+                if !Self::lockfile_in_sync(manifest, lockfile, &dependency_groups) {
+                    panic!("--frozen-lockfile requires pnpm-lock.yaml to be in sync with package.json");
+                }
                 Self::install_from_lockfile(
                     tarball_mem_cache,
                     http_client,
@@ -268,6 +325,8 @@ mod tests {
             registry_metadata_cache: &registry_metadata_cache,
             offline: false,
             prefer_offline: false,
+            lockfile_only: false,
+            resolution_only: false,
         }
         .run()
         .await;
@@ -328,6 +387,8 @@ mod tests {
             registry_metadata_cache: &registry_metadata_cache,
             offline: false,
             prefer_offline: false,
+            lockfile_only: false,
+            resolution_only: false,
         }
         .run()
         .await;
@@ -352,6 +413,8 @@ mod tests {
             registry_metadata_cache: &registry_metadata_cache,
             offline: false,
             prefer_offline: false,
+            lockfile_only: false,
+            resolution_only: false,
         }
         .run()
         .await;

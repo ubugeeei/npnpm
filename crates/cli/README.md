@@ -48,15 +48,15 @@ This file tracks the path toward full pnpm CLI compatibility.
 |      | --prod                      |       |
 | ✅   | --dev                       |       |
 | ✅   | --no-optional               |       |
-|      | --lockfile-only             |       |
+| ✅   | --lockfile-only             | skips node_modules writes |
 |      | --fix-lockfile              |       |
-|      | --frozen-lockfile           |       |
+| ✅   | --frozen-lockfile           | fails when pnpm-lock.yaml is out of sync |
 |      | --reporter=<name>           |       |
 |      | --use-store-server          |       |
 |      | --shamefully-hoist          |       |
 |      | --ignore-scripts            |       |
 |      | --filter <package_selector> |       |
-|      | --resolution-only           |       |
+| ✅   | --resolution-only           | re-resolves and updates lockfile only |
 
 # Run scripts
 

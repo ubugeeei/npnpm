@@ -56,6 +56,14 @@ pub struct InstallArgs {
     /// Reuse cached/store data when available before hitting the network.
     #[clap(long)]
     pub prefer_offline: bool,
+
+    /// Generate only the lockfile and skip node_modules updates.
+    #[clap(long)]
+    pub lockfile_only: bool,
+
+    /// Re-run resolution and update the lockfile without touching node_modules.
+    #[clap(long)]
+    pub resolution_only: bool,
 }
 
 impl InstallArgs {
@@ -69,8 +77,16 @@ impl InstallArgs {
             resolved_packages,
             registry_metadata_cache,
         } = &state;
-        let InstallArgs { dependency_options, frozen_lockfile, offline, prefer_offline } = self;
-        let loaded_lockfile = if lockfile.is_none() && (offline || frozen_lockfile) {
+        let InstallArgs {
+            dependency_options,
+            frozen_lockfile,
+            offline,
+            prefer_offline,
+            lockfile_only,
+            resolution_only,
+        } = self;
+        let loaded_lockfile = if lockfile.is_none() && (offline || frozen_lockfile || lockfile_only)
+        {
             let lockfile_dir = manifest.path().parent().unwrap_or(Path::new("."));
             Lockfile::load_from_dir(lockfile_dir).wrap_err("load pnpm-lock.yaml for install")?
         } else {
@@ -90,6 +106,8 @@ impl InstallArgs {
             registry_metadata_cache,
             offline,
             prefer_offline,
+            lockfile_only,
+            resolution_only,
         }
         .run()
         .await;

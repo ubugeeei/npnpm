@@ -130,6 +130,8 @@ impl<'a> Update<'a> {
             frozen_lockfile: false,
             offline: false,
             prefer_offline: false,
+            lockfile_only: false,
+            resolution_only: false,
         }
         .run()
         .await;
