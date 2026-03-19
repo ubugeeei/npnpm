@@ -1,7 +1,10 @@
 use crate::State;
 use clap::Args;
+use miette::Context;
+use pacquet_lockfile::Lockfile;
 use pacquet_package_manager::Install;
 use pacquet_package_manifest::DependencyGroup;
+use std::path::Path;
 
 #[derive(Debug, Args)]
 pub struct InstallDependencyOptions {
@@ -45,6 +48,14 @@ pub struct InstallArgs {
     /// Don't generate a lockfile and fail if the lockfile is outdated.
     #[clap(long)]
     pub frozen_lockfile: bool,
+
+    /// Use only packages already available in the store.
+    #[clap(long)]
+    pub offline: bool,
+
+    /// Reuse cached/store data when available before hitting the network.
+    #[clap(long)]
+    pub prefer_offline: bool,
 }
 
 impl InstallArgs {
@@ -58,18 +69,31 @@ impl InstallArgs {
             resolved_packages,
             registry_metadata_cache,
         } = &state;
-        let InstallArgs { dependency_options, frozen_lockfile } = self;
+        let InstallArgs {
+            dependency_options,
+            frozen_lockfile,
+            offline,
+            prefer_offline: _prefer_offline,
+        } = self;
+        let loaded_lockfile = if lockfile.is_none() && (offline || frozen_lockfile) {
+            let lockfile_dir = manifest.path().parent().unwrap_or(Path::new("."));
+            Lockfile::load_from_dir(lockfile_dir).wrap_err("load pnpm-lock.yaml for install")?
+        } else {
+            None
+        };
+        let effective_lockfile = lockfile.as_ref().or(loaded_lockfile.as_ref());
 
         Install {
             tarball_mem_cache,
             http_client,
             config,
             manifest,
-            lockfile: lockfile.as_ref(),
+            lockfile: effective_lockfile,
             dependency_groups: dependency_options.dependency_groups(),
             frozen_lockfile,
             resolved_packages,
             registry_metadata_cache,
+            offline,
         }
         .run()
         .await;

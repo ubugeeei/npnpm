@@ -24,6 +24,13 @@ use tokio::sync::{Notify, RwLock};
 use tracing::instrument;
 use zune_inflate::{errors::InflateDecodeErrors, DeflateDecoder, DeflateOptions};
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum NetworkMode {
+    #[default]
+    Online,
+    Offline,
+}
+
 #[derive(Debug, Display, Error, Diagnostic)]
 #[display("Failed to fetch {url}: {error}")]
 pub struct NetworkError {
@@ -77,6 +84,10 @@ pub enum TarballError {
     #[diagnostic(code(pacquet_tarball::parse_file_integrity))]
     ParseFileIntegrity(ssri::Error),
 
+    #[display("Package is missing from the store while offline: {url}")]
+    #[diagnostic(code(pacquet_tarball::offline_cache_miss))]
+    OfflineCacheMiss { url: String },
+
     #[from(ignore)]
     #[diagnostic(code(pacquet_tarball::task_join_error))]
     TaskJoin(tokio::task::JoinError),
@@ -119,6 +130,7 @@ pub struct DownloadTarballToStore<'a> {
     pub package_integrity: &'a Integrity,
     pub package_unpacked_size: Option<usize>,
     pub package_url: &'a str,
+    pub network_mode: NetworkMode,
 }
 
 impl<'a> DownloadTarballToStore<'a> {
@@ -151,7 +163,7 @@ impl<'a> DownloadTarballToStore<'a> {
         self,
         mem_cache: &'a MemCache,
     ) -> Result<Arc<HashMap<String, PathBuf>>, TarballError> {
-        let &DownloadTarballToStore { package_url, .. } = &self;
+        let &DownloadTarballToStore { package_url, network_mode, .. } = &self;
 
         if let Some(cache_lock) = mem_cache.get(package_url) {
             let notify = match &*cache_lock.write().await {
@@ -180,6 +192,8 @@ impl<'a> DownloadTarballToStore<'a> {
             let cas_paths = if let Some(cas_paths) = self.load_from_store()? {
                 tracing::info!(target: "pacquet::download", ?package_url, "Reuse store index");
                 cas_paths
+            } else if matches!(network_mode, NetworkMode::Offline) {
+                return Err(TarballError::OfflineCacheMiss { url: package_url.to_string() });
             } else {
                 tracing::info!(target: "pacquet::download", ?package_url, "Use network cache miss");
                 self.run_without_mem_cache().await?
@@ -350,7 +364,8 @@ mod tests {
             store_dir: store_path,
             package_integrity: &integrity("sha512-dj7vjIn1Ar8sVXj2yAXiMNCJDmS9MQ9XMlIecX2dIzzhjSHCyKo4DdXjXMs7wKW2kj6yvVRSpuQjOZ3YLrh56w=="),
             package_unpacked_size: Some(16697),
-            package_url: "https://registry.npmjs.org/@fastify/error/-/error-3.3.0.tgz"
+            package_url: "https://registry.npmjs.org/@fastify/error/-/error-3.3.0.tgz",
+            network_mode: NetworkMode::Online,
         }
         .run_without_mem_cache()
         .await
@@ -390,6 +405,7 @@ mod tests {
             package_integrity: &integrity("sha512-aaaan1Ar8sVXj2yAXiMNCJDmS9MQ9XMlIecX2dIzzhjSHCyKo4DdXjXMs7wKW2kj6yvVRSpuQjOZ3YLrh56w=="),
             package_unpacked_size: Some(16697),
             package_url: "https://registry.npmjs.org/@fastify/error/-/error-3.3.0.tgz",
+            network_mode: NetworkMode::Online,
         }
         .run_without_mem_cache()
         .await
@@ -411,6 +427,7 @@ mod tests {
             package_integrity: &package_integrity,
             package_unpacked_size: Some(16697),
             package_url: "https://registry.npmjs.org/@fastify/error/-/error-3.3.0.tgz",
+            network_mode: NetworkMode::Online,
         }
         .run_without_mem_cache()
         .await
@@ -423,6 +440,7 @@ mod tests {
             package_integrity: &package_integrity,
             package_unpacked_size: Some(16697),
             package_url: "https://127.0.0.1:9/should-not-be-fetched.tgz",
+            network_mode: NetworkMode::Online,
         }
         .run_with_mem_cache(&mem_cache)
         .await
@@ -430,6 +448,26 @@ mod tests {
 
         assert!(cas_files.contains_key("package.json"));
 
+        drop(store_dir);
+    }
+
+    #[tokio::test]
+    async fn offline_mode_should_fail_when_package_is_not_in_store() {
+        let (store_dir, store_path) = tempdir_with_leaked_path();
+        let mem_cache = MemCache::new();
+        let error = DownloadTarballToStore {
+            http_client: &Default::default(),
+            store_dir: store_path,
+            package_integrity: &integrity("sha512-dj7vjIn1Ar8sVXj2yAXiMNCJDmS9MQ9XMlIecX2dIzzhjSHCyKo4DdXjXMs7wKW2kj6yvVRSpuQjOZ3YLrh56w=="),
+            package_unpacked_size: Some(16697),
+            package_url: "https://registry.npmjs.org/@fastify/error/-/error-3.3.0.tgz",
+            network_mode: NetworkMode::Offline,
+        }
+        .run_with_mem_cache(&mem_cache)
+        .await
+        .expect_err("offline store miss");
+
+        assert!(matches!(error, TarballError::OfflineCacheMiss { .. }));
         drop(store_dir);
     }
 }

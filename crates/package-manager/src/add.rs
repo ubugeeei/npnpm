@@ -103,6 +103,7 @@ where
             frozen_lockfile: false,
             resolved_packages,
             registry_metadata_cache,
+            offline: false,
         }
         .run()
         .await;

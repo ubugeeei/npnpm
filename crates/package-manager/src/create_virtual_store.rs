@@ -3,7 +3,7 @@ use futures_util::future;
 use pacquet_lockfile::{DependencyPath, PackageSnapshot, RootProjectSnapshot};
 use pacquet_network::ThrottledClient;
 use pacquet_npmrc::Npmrc;
-use pacquet_tarball::MemCache;
+use pacquet_tarball::{MemCache, NetworkMode};
 use pipe_trait::Pipe;
 use std::collections::HashMap;
 
@@ -15,6 +15,7 @@ pub struct CreateVirtualStore<'a> {
     pub config: &'static Npmrc,
     pub packages: Option<&'a HashMap<DependencyPath, PackageSnapshot>>,
     pub project_snapshot: &'a RootProjectSnapshot,
+    pub network_mode: NetworkMode,
 }
 
 impl<'a> CreateVirtualStore<'a> {
@@ -26,6 +27,7 @@ impl<'a> CreateVirtualStore<'a> {
             config,
             packages,
             project_snapshot,
+            network_mode,
         } = self;
 
         let packages = packages.unwrap_or_else(|| {
@@ -42,6 +44,7 @@ impl<'a> CreateVirtualStore<'a> {
                     config,
                     dependency_path,
                     package_snapshot,
+                    network_mode,
                 }
                 .run()
                 .await

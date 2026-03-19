@@ -43,8 +43,8 @@ This file tracks the path toward full pnpm CLI compatibility.
 | Done | Command                     | Notes |
 | ---- | --------------------------- | ----- |
 |      | --force                     |       |
-|      | --offline                   |       |
-|      | --prefer-offline            |       |
+| ✅   | --offline                   | lockfile + store reuse path |
+| ~    | --prefer-offline            | accepted, but persistent metadata cache is still missing |
 |      | --prod                      |       |
 | ✅   | --dev                       |       |
 | ✅   | --no-optional               |       |
@@ -102,3 +102,12 @@ This file tracks the path toward full pnpm CLI compatibility.
 ## `pacquet init`
 
 [pnpm documentation](https://pnpm.io/cli/init)
+
+## `pacquet fetch`
+
+[pnpm documentation](https://pnpm.io/cli/fetch)
+
+| Done | Command | Notes |
+| ---- | ------- | ----- |
+| ✅   | --prod  |       |
+| ✅   | --dev   |       |

@@ -4,7 +4,7 @@ use miette::Diagnostic;
 use pacquet_lockfile::{DependencyPath, LockfileResolution, PackageSnapshot, PkgNameVerPeer};
 use pacquet_network::ThrottledClient;
 use pacquet_npmrc::Npmrc;
-use pacquet_tarball::{DownloadTarballToStore, MemCache, TarballError};
+use pacquet_tarball::{DownloadTarballToStore, MemCache, NetworkMode, TarballError};
 use pipe_trait::Pipe;
 use std::borrow::Cow;
 
@@ -17,6 +17,7 @@ pub struct InstallPackageBySnapshot<'a> {
     pub config: &'static Npmrc,
     pub dependency_path: &'a DependencyPath,
     pub package_snapshot: &'a PackageSnapshot,
+    pub network_mode: NetworkMode,
 }
 
 /// Error type of [`InstallPackageBySnapshot`].
@@ -35,6 +36,7 @@ impl<'a> InstallPackageBySnapshot<'a> {
             config,
             dependency_path,
             package_snapshot,
+            network_mode,
         } = self;
         let PackageSnapshot { resolution, .. } = package_snapshot;
         let DependencyPath { custom_registry, package_specifier } = dependency_path;
@@ -69,6 +71,7 @@ impl<'a> InstallPackageBySnapshot<'a> {
             package_integrity: integrity,
             package_unpacked_size: None,
             package_url: &tarball_url,
+            network_mode,
         }
         .run_with_mem_cache(tarball_mem_cache)
         .await
@@ -163,6 +166,7 @@ mod tests {
             package_integrity: &integrity,
             package_unpacked_size: Some(16697),
             package_url: &format!("{}/@fastify+error-3.3.0.tgz", server.url()),
+            network_mode: NetworkMode::Online,
         }
         .run_without_mem_cache()
         .await
@@ -210,6 +214,7 @@ mod tests {
             config,
             dependency_path: &dependency_path,
             package_snapshot: &package_snapshot,
+            network_mode: NetworkMode::Online,
         }
         .run()
         .await

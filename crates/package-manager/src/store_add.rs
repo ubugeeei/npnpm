@@ -6,7 +6,7 @@ use miette::Diagnostic;
 use pacquet_network::ThrottledClient;
 use pacquet_npmrc::Npmrc;
 use pacquet_registry::{PackageVersion, RegistryError};
-use pacquet_tarball::{DownloadTarballToStore, MemCache, TarballError};
+use pacquet_tarball::{DownloadTarballToStore, MemCache, NetworkMode, TarballError};
 
 /// Populate the store with packages and their transitive dependencies without creating node_modules.
 #[must_use]
@@ -105,6 +105,7 @@ impl<'a> StoreAdder<'a> {
                 .expect("registry metadata should include integrity"),
             package_unpacked_size: package.dist.unpacked_size,
             package_url: package.as_tarball_url(),
+            network_mode: NetworkMode::Online,
         }
         .run_with_mem_cache(self.tarball_mem_cache)
         .await

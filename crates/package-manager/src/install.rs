@@ -6,7 +6,7 @@ use pacquet_lockfile::{Lockfile, RootProjectSnapshot};
 use pacquet_network::ThrottledClient;
 use pacquet_npmrc::Npmrc;
 use pacquet_package_manifest::{DependencyGroup, PackageManifest};
-use pacquet_tarball::MemCache;
+use pacquet_tarball::{MemCache, NetworkMode};
 use std::{collections::HashMap, path::Path};
 
 /// This subroutine does everything `pacquet install` is supposed to do.
@@ -24,6 +24,7 @@ where
     pub dependency_groups: DependencyGroupList,
     pub frozen_lockfile: bool,
     pub registry_metadata_cache: &'a RegistryMetadataCache,
+    pub offline: bool,
 }
 
 impl<'a, DependencyGroupList> Install<'a, DependencyGroupList>
@@ -64,6 +65,7 @@ where
         config: &'static Npmrc,
         lockfile: &Lockfile,
         dependency_groups: Vec<DependencyGroup>,
+        network_mode: NetworkMode,
     ) {
         let Lockfile { lockfile_version, project_snapshot, packages, .. } = lockfile;
         assert_eq!(lockfile_version.major, 6); // compatibility check already happens at serde, but this still helps preventing programmer mistakes.
@@ -75,6 +77,7 @@ where
             project_snapshot,
             packages: packages.as_ref(),
             dependency_groups,
+            network_mode,
         }
         .run()
         .await;
@@ -92,13 +95,34 @@ where
             dependency_groups,
             frozen_lockfile,
             registry_metadata_cache,
+            offline,
         } = self;
         let dependency_groups = dependency_groups.into_iter().collect::<Vec<_>>();
 
         tracing::info!(target: "pacquet::install", "Start all");
 
-        match (config.lockfile, frozen_lockfile, lockfile) {
-            (false, _, _) => {
+        match (offline, config.lockfile, frozen_lockfile, lockfile) {
+            (true, _, _, None) => {
+                panic!("--offline requires an existing pnpm-lock.yaml");
+            }
+            (true, _, frozen_lockfile, Some(lockfile))
+                if frozen_lockfile
+                    || Self::lockfile_matches_manifest(manifest, lockfile, &dependency_groups) =>
+            {
+                Self::install_from_lockfile(
+                    tarball_mem_cache,
+                    http_client,
+                    config,
+                    lockfile,
+                    dependency_groups,
+                    NetworkMode::Offline,
+                )
+                .await;
+            }
+            (true, _, _, Some(_)) => {
+                panic!("--offline requires pnpm-lock.yaml to be in sync with package.json");
+            }
+            (false, false, _, _) => {
                 InstallWithoutLockfile {
                     tarball_mem_cache,
                     resolved_packages,
@@ -111,20 +135,21 @@ where
                 .run()
                 .await;
             }
-            (true, true, None) => {
+            (false, true, true, None) => {
                 panic!("--frozen-lockfile requires an existing pnpm-lock.yaml");
             }
-            (true, true, Some(lockfile)) => {
+            (false, true, true, Some(lockfile)) => {
                 Self::install_from_lockfile(
                     tarball_mem_cache,
                     http_client,
                     config,
                     lockfile,
                     dependency_groups,
+                    NetworkMode::Online,
                 )
                 .await;
             }
-            (true, false, Some(lockfile))
+            (false, true, false, Some(lockfile))
                 if config.prefer_frozen_lockfile
                     && Self::lockfile_matches_manifest(manifest, lockfile, &dependency_groups) =>
             {
@@ -134,10 +159,11 @@ where
                     config,
                     lockfile,
                     dependency_groups,
+                    NetworkMode::Online,
                 )
                 .await;
             }
-            (true, false, _) => {
+            (false, true, false, _) => {
                 let generated_lockfile = GenerateLockfile {
                     http_client,
                     config,
@@ -160,6 +186,7 @@ where
                     config,
                     &generated_lockfile,
                     dependency_groups,
+                    NetworkMode::Online,
                 )
                 .await;
             }
@@ -231,6 +258,7 @@ mod tests {
             frozen_lockfile: false,
             resolved_packages: &Default::default(),
             registry_metadata_cache: &registry_metadata_cache,
+            offline: false,
         }
         .run()
         .await;
@@ -289,6 +317,7 @@ mod tests {
             frozen_lockfile: false,
             resolved_packages: &resolved_packages,
             registry_metadata_cache: &registry_metadata_cache,
+            offline: false,
         }
         .run()
         .await;
@@ -311,6 +340,7 @@ mod tests {
             frozen_lockfile: true,
             resolved_packages: &resolved_packages,
             registry_metadata_cache: &registry_metadata_cache,
+            offline: false,
         }
         .run()
         .await;

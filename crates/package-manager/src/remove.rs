@@ -70,6 +70,7 @@ where
                 DependencyGroup::Optional,
             ],
             frozen_lockfile: false,
+            offline: false,
         }
         .run()
         .await;

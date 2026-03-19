@@ -125,6 +125,7 @@ impl<'a> Update<'a> {
             lockfile: None,
             dependency_groups,
             frozen_lockfile: false,
+            offline: false,
         }
         .run()
         .await;

@@ -7,7 +7,7 @@ use miette::Diagnostic;
 use pacquet_network::ThrottledClient;
 use pacquet_npmrc::Npmrc;
 use pacquet_registry::{PackageVersion, RegistryError};
-use pacquet_tarball::{DownloadTarballToStore, MemCache, TarballError};
+use pacquet_tarball::{DownloadTarballToStore, MemCache, NetworkMode, TarballError};
 use std::path::Path;
 
 /// This subroutine executes the following and returns the package
@@ -88,6 +88,7 @@ impl<'a> InstallPackageFromRegistry<'a> {
                 .expect("has integrity field"),
             package_unpacked_size: package_version.dist.unpacked_size,
             package_url: package_version.as_tarball_url(),
+            network_mode: NetworkMode::Online,
         }
         .run_with_mem_cache(tarball_mem_cache)
         .await

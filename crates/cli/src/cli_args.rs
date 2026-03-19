@@ -1,6 +1,7 @@
 pub mod add;
 pub mod bin;
 pub mod exec;
+pub mod fetch;
 pub mod install;
 pub mod remove;
 pub mod root;
@@ -13,6 +14,7 @@ use add::AddArgs;
 use bin::BinArgs;
 use clap::{Parser, Subcommand};
 use exec::ExecArgs;
+use fetch::FetchArgs;
 use install::InstallArgs;
 use miette::{Context, IntoDiagnostic};
 use pacquet_executor::execute_shell_with_context;
@@ -51,6 +53,8 @@ pub enum CliCommand {
     Add(AddArgs),
     /// Install packages
     Install(InstallArgs),
+    /// Fetch packages from a lockfile into the store and virtual store.
+    Fetch(FetchArgs),
     /// Remove packages
     #[clap(alias = "rm", alias = "uninstall", alias = "un")]
     Remove(RemoveArgs),
@@ -100,6 +104,7 @@ impl CliArgs {
             }
             CliCommand::Add(args) => args.run(state()?).await?,
             CliCommand::Install(args) => args.run(state()?).await?,
+            CliCommand::Fetch(args) => args.run(&base_dir, || npmrc()).await?,
             CliCommand::Remove(args) => args.run(state()?).await?,
             CliCommand::Update(args) => args.run(state()?).await?,
             CliCommand::Test => {
