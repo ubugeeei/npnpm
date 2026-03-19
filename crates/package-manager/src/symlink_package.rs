@@ -24,6 +24,13 @@ pub enum SymlinkPackageError {
         #[error(source)]
         error: io::Error,
     },
+
+    #[display("Failed to remove stale path at {path:?}: {error}")]
+    RemoveStalePath {
+        path: PathBuf,
+        #[error(source)]
+        error: io::Error,
+    },
 }
 
 /// Create symlink for a package.
@@ -43,16 +50,34 @@ pub fn symlink_package(
             error,
         })?;
     }
+    if symlink_path.exists() {
+        let same_target =
+            fs::canonicalize(symlink_path).ok() == fs::canonicalize(symlink_target).ok();
+        if same_target {
+            return Ok(());
+        }
+
+        let metadata = fs::symlink_metadata(symlink_path).map_err(|error| {
+            SymlinkPackageError::RemoveStalePath { path: symlink_path.to_path_buf(), error }
+        })?;
+        let remove = if metadata.file_type().is_symlink() || metadata.is_file() {
+            fs::remove_file(symlink_path)
+        } else {
+            fs::remove_dir_all(symlink_path)
+        };
+        remove.map_err(|error| SymlinkPackageError::RemoveStalePath {
+            path: symlink_path.to_path_buf(),
+            error,
+        })?;
+    }
+
     if let Err(error) = symlink_dir(symlink_target, symlink_path) {
-        match error.kind() {
-            ErrorKind::AlreadyExists => {}
-            _ => {
-                return Err(SymlinkPackageError::SymlinkDir {
-                    symlink_target: symlink_target.to_path_buf(),
-                    symlink_path: symlink_path.to_path_buf(),
-                    error,
-                })
-            }
+        if error.kind() != ErrorKind::AlreadyExists {
+            return Err(SymlinkPackageError::SymlinkDir {
+                symlink_target: symlink_target.to_path_buf(),
+                symlink_path: symlink_path.to_path_buf(),
+                error,
+            });
         }
     }
     Ok(())

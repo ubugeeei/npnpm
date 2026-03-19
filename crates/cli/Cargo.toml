@@ -43,5 +43,7 @@ command-extra     = { workspace = true }
 insta             = { workspace = true }
 pretty_assertions = { workspace = true }
 serde_json        = { workspace = true }
+ssri              = { workspace = true }
 tempfile          = { workspace = true }
 walkdir           = { workspace = true }
+mockito           = { workspace = true }

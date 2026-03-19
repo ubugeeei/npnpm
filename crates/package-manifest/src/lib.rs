@@ -169,6 +169,37 @@ impl PackageManifest {
             .flat_map(|(name, version)| version.as_str().map(|value| (name.as_str(), value)))
     }
 
+    pub fn dependency_entries(
+        &self,
+        groups: impl IntoIterator<Item = DependencyGroup>,
+    ) -> Vec<(DependencyGroup, String, String)> {
+        groups
+            .into_iter()
+            .flat_map(|group| {
+                self.value
+                    .get::<&str>(group.into())
+                    .and_then(Value::as_object)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(move |(name, version)| {
+                        version.as_str().map(|value| (group, name.to_string(), value.to_string()))
+                    })
+            })
+            .collect()
+    }
+
+    pub fn dependency_version(
+        &self,
+        name: &str,
+        dependency_group: DependencyGroup,
+    ) -> Option<&str> {
+        self.value
+            .get::<&str>(dependency_group.into())
+            .and_then(Value::as_object)
+            .and_then(|dependencies| dependencies.get(name))
+            .and_then(Value::as_str)
+    }
+
     pub fn bundle_dependencies(&self) -> Result<Option<BundleDependencies>, serde_json::Error> {
         self.value
             .get("bundleDependencies")
@@ -215,6 +246,35 @@ impl PackageManifest {
             self.value[dependency_type] = Value::Object(dependencies);
         }
         Ok(())
+    }
+
+    pub fn remove_dependency(
+        &mut self,
+        name: &str,
+        dependency_group: DependencyGroup,
+    ) -> Result<bool, PackageManifestError> {
+        let dependency_type: &str = dependency_group.into();
+        let root = self.value.as_object_mut().ok_or_else(|| {
+            PackageManifestError::InvalidAttribute(
+                "package manifest root should be an object".into(),
+            )
+        })?;
+
+        let Some(field) = root.get_mut(dependency_type) else {
+            return Ok(false);
+        };
+
+        let dependencies = field.as_object_mut().ok_or_else(|| {
+            PackageManifestError::InvalidAttribute(
+                "dependencies attribute should be an object".to_string(),
+            )
+        })?;
+        let removed = dependencies.remove(name).is_some();
+        let should_remove_field = dependencies.is_empty();
+        if should_remove_field {
+            root.remove(dependency_type);
+        }
+        Ok(removed)
     }
 
     fn default_bin_name(package_name: &str) -> Option<&str> {
@@ -290,6 +350,33 @@ mod tests {
         assert_eq!(dependencies.get("fastify").unwrap(), &"1.0.0");
         manifest.save().unwrap();
         assert!(read_to_string(tmp).unwrap().contains("fastify"));
+    }
+
+    #[test]
+    fn should_remove_dependency_and_empty_group() {
+        let dir = tempdir().unwrap();
+        let tmp = dir.path().join("package.json");
+        let mut manifest = PackageManifest::create_if_needed(tmp).unwrap();
+        manifest.add_dependency("fastify", "1.0.0", DependencyGroup::Prod).unwrap();
+        assert!(manifest.remove_dependency("fastify", DependencyGroup::Prod).unwrap());
+        assert_eq!(manifest.dependency_version("fastify", DependencyGroup::Prod), None);
+        assert!(
+            manifest.value().get("dependencies").is_none(),
+            "expected empty dependency group to be removed"
+        );
+    }
+
+    #[test]
+    fn should_collect_dependency_entries_with_groups() {
+        let dir = tempdir().unwrap();
+        let tmp = dir.path().join("package.json");
+        let mut manifest = PackageManifest::create_if_needed(tmp).unwrap();
+        manifest.add_dependency("fastify", "^1.0.0", DependencyGroup::Prod).unwrap();
+        manifest.add_dependency("vitest", "^2.0.0", DependencyGroup::Dev).unwrap();
+
+        let entries = manifest.dependency_entries([DependencyGroup::Prod, DependencyGroup::Dev]);
+        assert!(entries.contains(&(DependencyGroup::Prod, "fastify".into(), "^1.0.0".into())));
+        assert!(entries.contains(&(DependencyGroup::Dev, "vitest".into(), "^2.0.0".into())));
     }
 
     #[test]

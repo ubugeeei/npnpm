@@ -15,6 +15,7 @@ pacquet-fs = { workspace = true }
 
 derive_more = { workspace = true }
 miette      = { workspace = true }
+rayon       = { workspace = true }
 serde       = { workspace = true }
 serde_json  = { workspace = true }
 sha2        = { workspace = true }
@@ -23,3 +24,4 @@ ssri        = { workspace = true }
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 pipe-trait        = { workspace = true }
+tempfile          = { workspace = true }

@@ -1,4 +1,6 @@
-use crate::{fetch_package_metadata, Install, RegistryMetadataCache, ResolvedPackages};
+use crate::{
+    fetch_package_metadata, Install, ParsedPackageSpec, RegistryMetadataCache, ResolvedPackages,
+};
 use derive_more::{Display, Error};
 use futures_util::future::join_all;
 use miette::Diagnostic;
@@ -111,32 +113,9 @@ where
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
-struct ParsedPackageSpec<'a> {
-    name: &'a str,
-    specifier: Option<&'a str>,
-}
-
-impl<'a> ParsedPackageSpec<'a> {
-    fn parse(input: &'a str) -> Self {
-        let separator = input
-            .char_indices()
-            .skip(1)
-            .filter_map(|(index, ch)| (ch == '@').then_some(index))
-            .last()
-            .filter(|index| index + 1 < input.len());
-
-        let (name, specifier) = separator
-            .map(|index| (&input[..index], Some(&input[index + 1..])))
-            .unwrap_or((input, None));
-
-        Self { name, specifier }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::ParsedPackageSpec;
+    use crate::ParsedPackageSpec;
     use pretty_assertions::assert_eq;
 
     #[test]

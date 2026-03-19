@@ -1,4 +1,4 @@
-use crate::symlink_package;
+use crate::{symlink_package, sync_direct_dependency_links};
 use pacquet_lockfile::{PkgNameVerPeer, RootProjectSnapshot};
 use pacquet_npmrc::Npmrc;
 use pacquet_package_manifest::DependencyGroup;
@@ -32,24 +32,28 @@ where
             panic!("Monorepo is not yet supported"); // TODO: properly propagate this error
         };
 
-        project_snapshot
-            .dependencies_by_groups(dependency_groups)
-            .collect::<Vec<_>>()
-            .par_iter()
-            .for_each(|(name, spec)| {
-                let virtual_store_name =
-                    PkgNameVerPeer::to_virtual_store_name_from_parts(name, &spec.version);
+        let direct_dependencies =
+            project_snapshot.dependencies_by_groups(dependency_groups).collect::<Vec<_>>();
+        sync_direct_dependency_links(
+            &config.modules_dir,
+            direct_dependencies.iter().map(|(name, _)| name.to_string()),
+        )
+        .expect("sync direct dependency links");
 
-                let name_str = name.to_string();
-                symlink_package(
-                    &config
-                        .virtual_store_dir
-                        .join(virtual_store_name)
-                        .join("node_modules")
-                        .join(&name_str),
-                    &config.modules_dir.join(&name_str),
-                )
-                .expect("symlink pkg"); // TODO: properly propagate this error
-            });
+        direct_dependencies.par_iter().for_each(|(name, spec)| {
+            let virtual_store_name =
+                PkgNameVerPeer::to_virtual_store_name_from_parts(name, &spec.version);
+
+            let name_str = name.to_string();
+            symlink_package(
+                &config
+                    .virtual_store_dir
+                    .join(virtual_store_name)
+                    .join("node_modules")
+                    .join(&name_str),
+                &config.modules_dir.join(&name_str),
+            )
+            .expect("symlink pkg"); // TODO: properly propagate this error
+        });
     }
 }

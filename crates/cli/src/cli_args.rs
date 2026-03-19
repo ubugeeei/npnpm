@@ -2,9 +2,11 @@ pub mod add;
 pub mod bin;
 pub mod exec;
 pub mod install;
+pub mod remove;
 pub mod root;
 pub mod run;
 pub mod store;
+pub mod update;
 
 use crate::State;
 use add::AddArgs;
@@ -16,6 +18,7 @@ use miette::{Context, IntoDiagnostic};
 use pacquet_executor::execute_shell_with_context;
 use pacquet_npmrc::Npmrc;
 use pacquet_package_manifest::PackageManifest;
+use remove::RemoveArgs;
 use root::RootArgs;
 use run::{project_bin_paths, run_script, RunArgs};
 use std::{
@@ -23,6 +26,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 use store::StoreCommand;
+use update::UpdateArgs;
 
 /// Experimental package manager for node.js written in rust.
 #[derive(Debug, Parser)]
@@ -47,6 +51,12 @@ pub enum CliCommand {
     Add(AddArgs),
     /// Install packages
     Install(InstallArgs),
+    /// Remove packages
+    #[clap(alias = "rm", alias = "uninstall", alias = "un")]
+    Remove(RemoveArgs),
+    /// Update packages
+    #[clap(alias = "up", alias = "upgrade")]
+    Update(UpdateArgs),
     /// Runs a package's "test" script, if one was provided.
     Test,
     /// Runs a defined package script.
@@ -90,6 +100,8 @@ impl CliArgs {
             }
             CliCommand::Add(args) => args.run(state()?).await?,
             CliCommand::Install(args) => args.run(state()?).await?,
+            CliCommand::Remove(args) => args.run(state()?).await?,
+            CliCommand::Update(args) => args.run(state()?).await?,
             CliCommand::Test => {
                 let manifest = PackageManifest::from_path(manifest_path())
                     .wrap_err("getting the package.json in current directory")?;
@@ -127,7 +139,7 @@ impl CliArgs {
                 )
                 .wrap_err(format!("executing command: \"{0}\"", command))?;
             }
-            CliCommand::Store(command) => command.run(|| npmrc())?,
+            CliCommand::Store(command) => command.run(|| npmrc()).await?,
             CliCommand::Script(args) => {
                 let Some((command, args)) = args.split_first() else {
                     return Ok(());

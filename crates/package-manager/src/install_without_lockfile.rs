@@ -1,4 +1,4 @@
-use crate::{InstallPackageFromRegistry, RegistryMetadataCache};
+use crate::{sync_direct_dependency_links, InstallPackageFromRegistry, RegistryMetadataCache};
 use async_recursion::async_recursion;
 use dashmap::DashSet;
 use futures_util::future;
@@ -50,9 +50,10 @@ impl<'a, DependencyGroupList> InstallWithoutLockfile<'a, DependencyGroupList> {
             resolved_packages,
             registry_metadata_cache,
         } = self;
+        let dependency_groups = dependency_groups.into_iter().collect::<Vec<_>>();
 
         let _: Vec<()> = manifest
-            .dependencies(dependency_groups.into_iter())
+            .dependencies(dependency_groups.iter().copied())
             .map(|(name, version_range)| async move {
                 let dependency = InstallPackageFromRegistry {
                     tarball_mem_cache,
@@ -81,6 +82,12 @@ impl<'a, DependencyGroupList> InstallWithoutLockfile<'a, DependencyGroupList> {
             })
             .pipe(future::join_all)
             .await;
+
+        sync_direct_dependency_links(
+            &config.modules_dir,
+            manifest.dependencies(dependency_groups).map(|(name, _)| name.to_string()),
+        )
+        .expect("sync direct dependency links");
     }
 }
 

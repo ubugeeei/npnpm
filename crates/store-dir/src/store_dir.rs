@@ -38,7 +38,7 @@ impl StoreDir {
     }
 
     /// The directory that contains all files from the once-installed packages.
-    fn files(&self) -> PathBuf {
+    pub(crate) fn files(&self) -> PathBuf {
         self.v3().join("files")
     }
 

@@ -1328,6 +1328,7 @@ dependencies = [
  "home",
  "insta",
  "miette",
+ "mockito",
  "pacquet-diagnostics",
  "pacquet-executor",
  "pacquet-fs",
@@ -1343,6 +1344,7 @@ dependencies = [
  "pipe-trait",
  "pretty_assertions",
  "serde_json",
+ "ssri",
  "tempfile",
  "tokio",
  "walkdir",
@@ -1544,10 +1546,12 @@ dependencies = [
  "pacquet-fs",
  "pipe-trait",
  "pretty_assertions",
+ "rayon",
  "serde",
  "serde_json",
  "sha2",
  "ssri",
+ "tempfile",
 ]
 
 [[package]]
